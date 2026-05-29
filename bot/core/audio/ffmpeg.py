@@ -19,7 +19,7 @@ class FFmpegProcess:
     """Manages a single FFmpeg subprocess that decodes audio.
 
     On Linux: outputs to PulseAudio sink via `-f pulse`
-    On macOS: outputs to Core Audio (system default) via `-f coreaudio`
+    On macOS: outputs to AudioToolbox (system default) via `-f audiotoolbox`
     """
 
     def __init__(
@@ -86,11 +86,11 @@ class FFmpegProcess:
         ]
 
         if self._is_macos:
-            cmd.extend(["-f", "coreaudio"])
+            cmd.extend(["-f", "audiotoolbox"])
+            cmd.append("default")
         else:
             cmd.extend(["-f", "pulse", "-sink_name", f"{self._pulse_sink}.sink"])
-
-        cmd.append("/dev/null")
+            cmd.append("/dev/null")
 
         logger.info("Starting FFmpeg: %s", " ".join(cmd[:6]) + "...")
 

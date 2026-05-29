@@ -68,6 +68,10 @@ class AsyncServerQueryClient:
         self._max_reconnect_delay = 60.0
         self._should_run = False
 
+        # Reader state for response buffering
+        self._response_buffer: list[str] = []
+        self._pending_future: asyncio.Future[SQResponse] | None = None
+
     @property
     def connected(self) -> bool:
         return self._connected
@@ -200,19 +204,14 @@ class AsyncServerQueryClient:
 
     async def _reader_loop(self) -> None:
         """Read lines from ServerQuery, routing events and responses."""
-        response_buffer: list[str] = []
-        pending_future: asyncio.Future[SQResponse] | None = None
-
         try:
             while self._should_run and self._reader:
                 try:
                     line_bytes = await asyncio.wait_for(self._reader.readline(), timeout=300.0)
                 except asyncio.TimeoutError:
-                    # ServerQuery timeout (300s default), send keepalive
                     continue
 
                 if not line_bytes:
-                    # Connection closed
                     logger.warning("ServerQuery connection closed by server")
                     break
 
@@ -220,40 +219,35 @@ class AsyncServerQueryClient:
                 if not line:
                     continue
 
-                # Route: notify* → event dispatcher, else → response buffer
                 if line.startswith("notify"):
                     self.dispatcher.parse_and_emit(line)
                 elif line.startswith("error "):
-                    # End of response — parse and resolve
-                    response_buffer.append(line)
-                    raw_response = "\n".join(response_buffer)
+                    self._response_buffer.append(line)
+                    raw_response = "\n".join(self._response_buffer)
                     response = parse_response(raw_response)
 
-                    if pending_future and not pending_future.done():
-                        pending_future.set_result(response)
+                    if self._pending_future and not self._pending_future.done():
+                        self._pending_future.set_result(response)
 
-                    response_buffer.clear()
-                    pending_future = None
+                    self._response_buffer.clear()
+                    self._pending_future = None
                 else:
-                    # Data line — accumulate
-                    response_buffer.append(line)
+                    self._response_buffer.append(line)
 
         except asyncio.CancelledError:
             return
         except Exception:
             logger.exception("Reader loop error")
 
-        # Connection lost
         self._connected = False
-        if pending_future and not pending_future.done():
-            pending_future.set_exception(ConnectionError("ServerQuery connection lost"))
+        if self._pending_future and not self._pending_future.done():
+            self._pending_future.set_exception(ConnectionError("ServerQuery connection lost"))
 
-        # Trigger reconnect
         if self._should_run:
             asyncio.create_task(self._reconnect())
 
     async def _writer_loop(self) -> None:
-        """Dequeue commands and send them to ServerQuery."""
+        """Dequeue commands, send them, and set up pending future for reader."""
         try:
             while self._should_run:
                 cmd_str, future = await self._cmd_queue.get()
@@ -262,10 +256,25 @@ class AsyncServerQueryClient:
                     future.set_exception(ConnectionError("Not connected"))
                     continue
 
+                # Create a new pending future that the reader will resolve
+                self._pending_future = asyncio.get_event_loop().create_future()
+
+                # Link: when reader resolves _pending_future, forward to caller's future
+                def _forward(fut: asyncio.Future[SQResponse]) -> None:
+                    try:
+                        result = fut.result()
+                        if not future.done():
+                            future.set_result(result)
+                    except Exception as e:
+                        if not future.done():
+                            future.set_exception(e)
+
+                self._pending_future.add_done_callback(_forward)
+
+                # Write command
                 try:
-                    raw = await self._raw_send_and_wait(cmd_str)
-                    if not future.done():
-                        future.set_result(raw)
+                    self._writer.write(f"{cmd_str}\n".encode("utf-8"))
+                    await self._writer.drain()
                 except Exception as e:
                     if not future.done():
                         future.set_exception(e)
