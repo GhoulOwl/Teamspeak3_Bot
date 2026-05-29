@@ -1,0 +1,32 @@
+services:
+  ts3bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ts3bot
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./config:/opt/bot/config:ro
+      - ts3bot-data:/data
+      - ts3bot-identity:/home/ts3bot/.ts3client
+    ports:
+      - "${WEBHOOK_PORT:-8080}:8080"
+    environment:
+      - TS3_HOST=${TS3_HOST}
+      - TS3_PASSWORD=${TS3_PASSWORD}
+      - NETEASE_API_URL=${NETEASE_API_URL:-http://host.docker.internal:3000}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_BASE=${OPENAI_API_BASE:-https://api.openai.com/v1}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+    shm_size: "256m"
+    tmpfs:
+      - /tmp:size=100m
+      - /run/user/1000/pulse:size=10m
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  ts3bot-data:
+  ts3bot-identity:

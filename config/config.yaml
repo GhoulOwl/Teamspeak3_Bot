@@ -1,0 +1,75 @@
+# ── TeamSpeak 3 Server ──────────────────────────
+ts3:
+  host: "${TS3_HOST}"
+  query_port: 10011
+  voice_port: 9987
+  username: "serveradmin"
+  password: "${TS3_PASSWORD}"
+  virtual_server_id: 1
+  nickname: "MusicBot"
+  default_channel_id: 0
+  command_prefix: "!"
+
+# ── Audio Pipeline ──────────────────────────────
+audio:
+  pulse_sink_name: "ts3bot_sink"
+  default_volume: 70
+  fade_duration_ms: 500
+  ffmpeg_path: "/usr/bin/ffmpeg"
+  cache_dir: "/data/cache"
+  cache_max_mb: 500
+
+# ── Netease Cloud Music (yt-dlp) ─────────────────
+netease:
+  search_limit: 10
+  audio_quality: "exhigh"
+
+# ── AI Chat ─────────────────────────────────────
+chat:
+  api_base_url: "${OPENAI_API_BASE}"
+  api_key: "${OPENAI_API_KEY}"
+  model: "${OPENAI_MODEL}"
+  temperature: 0.8
+  max_tokens: 512
+  context_window: 20
+  default_persona: "gamer_friend"
+  per_channel_context: true
+
+# ── Automation ──────────────────────────────────
+automation:
+  welcome:
+    enabled: true
+    message: "欢迎 {username} 来到我们的游戏频道！输入 !help 查看可用命令"
+    delay_seconds: 2
+    mode: "channel"
+  auto_groups:
+    enabled: false
+    group_ids: []
+  follow_mode:
+    enabled: false
+    channel_ids: []
+    leave_when_empty: true
+    debounce_seconds: 1.5
+
+# ── Scheduled Reminders ─────────────────────────
+scheduler:
+  reminders: []
+  #  - name: "evening_gaming"
+  #    cron: "0 20 * * *"
+  #    message: "晚上好！今晚有谁来一起玩游戏吗？"
+  #    channel_id: 0
+
+# ── Webhook ─────────────────────────────────────
+webhook:
+  enabled: false
+  host: "0.0.0.0"
+  port: 8080
+  secret: "${WEBHOOK_SECRET}"
+
+# ── Logging ─────────────────────────────────────
+logging:
+  level: "INFO"
+  format: "text"
+  file: "/data/logs/bot.log"
+  max_bytes: 10485760
+  backup_count: 5

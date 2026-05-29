@@ -1,0 +1,19 @@
+# PulseAudio default configuration for TS3 Bot
+# Minimal setup: null sink + local protocol only
+
+# Load null sink (virtual audio device)
+load-module module-null-sink sink_name=ts3bot_sink sink_properties=device.description="TS3Bot_Virtual_Sink"
+
+# Set defaults
+set-default-sink ts3bot_sink
+set-default-source ts3bot_sink.monitor
+
+# Local protocol for FFmpeg and TS3 client
+load-module module-native-protocol-unix socket=/run/user/1000/pulse/native auth-anonymous=1
+
+# Automatically move streams to the default sink
+load-module module-always-sink
+load-module module-rescue-streams
+
+# Never suspend (important for Docker)
+load-module module-suspend-on-idle timeout=999999
