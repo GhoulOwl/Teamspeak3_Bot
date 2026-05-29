@@ -49,7 +49,7 @@ class AudioConfig(BaseModel):
     pulse_sink_name: str = "ts3bot_sink"
     default_volume: int = Field(default=70, ge=0, le=100)
     fade_duration_ms: int = 500
-    ffmpeg_path: str | None = "/usr/bin/ffmpeg"
+    ffmpeg_path: str | None = None  # Auto-detect if None
     cache_dir: str = "/data/cache"
     cache_max_mb: int = 500
 

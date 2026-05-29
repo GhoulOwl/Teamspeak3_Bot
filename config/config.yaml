@@ -15,7 +15,7 @@ audio:
   pulse_sink_name: "ts3bot_sink"
   default_volume: 70
   fade_duration_ms: 500
-  ffmpeg_path: "/usr/bin/ffmpeg"
+  ffmpeg_path: null  # Auto-detect (set to /usr/bin/ffmpeg for Docker/Linux)
   cache_dir: "/data/cache"
   cache_max_mb: 500
 
