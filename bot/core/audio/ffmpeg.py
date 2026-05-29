@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import platform
+import shutil
 import signal
 from typing import Any, Callable, Coroutine
 
@@ -14,23 +16,27 @@ FFmpegCallback = Callable[[], Coroutine[Any, Any, None]]
 
 
 class FFmpegProcess:
-    """Manages a single FFmpeg subprocess that decodes audio to PulseAudio.
+    """Manages a single FFmpeg subprocess that decodes audio.
 
-    The FFmpeg process reads from a URL/file and outputs decoded audio
-    directly to a PulseAudio sink via the `-f pulse` output format.
+    On Linux: outputs to PulseAudio sink via `-f pulse`
+    On macOS: outputs to Core Audio (system default) via `-f coreaudio`
     """
 
     def __init__(
         self,
-        ffmpeg_path: str = "/usr/bin/ffmpeg",
+        ffmpeg_path: str | None = None,
         pulse_sink: str = "ts3bot_sink",
         sample_rate: int = 48000,
         channels: int = 2,
     ) -> None:
+        # Auto-detect ffmpeg if not specified
+        if ffmpeg_path is None:
+            ffmpeg_path = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
         self._ffmpeg_path = ffmpeg_path
         self._pulse_sink = pulse_sink
         self._sample_rate = sample_rate
         self._channels = channels
+        self._is_macos = platform.system() == "Darwin"
 
         self._process: asyncio.subprocess.Process | None = None
         self._monitor_task: asyncio.Task | None = None
@@ -52,7 +58,10 @@ class FFmpegProcess:
         self._on_error = on_error
 
     async def start(self, url: str, volume: int = 70) -> None:
-        """Start FFmpeg to play a URL/file to the PulseAudio sink.
+        """Start FFmpeg to play a URL/file.
+
+        On Linux: outputs to PulseAudio sink
+        On macOS: outputs to Core Audio (system default speaker)
 
         Args:
             url: Audio source URL or file path
@@ -70,14 +79,18 @@ class FFmpegProcess:
             "-reconnect_delay_max", "5",
             "-i", url,
             "-af", f"volume={gain}",
-            "-f", "pulse",
-            "-sink_name", f"{self._pulse_sink}.sink",
             "-ac", str(self._channels),
             "-ar", str(self._sample_rate),
             "-nostdin",
             "-y",
-            "/dev/null",
         ]
+
+        if self._is_macos:
+            cmd.extend(["-f", "coreaudio"])
+        else:
+            cmd.extend(["-f", "pulse", "-sink_name", f"{self._pulse_sink}.sink"])
+
+        cmd.append("/dev/null")
 
         logger.info("Starting FFmpeg: %s", " ".join(cmd[:6]) + "...")
 

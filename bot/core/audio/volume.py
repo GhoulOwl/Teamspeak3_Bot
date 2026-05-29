@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import platform
 import re
 
 logger = logging.getLogger(__name__)
@@ -13,15 +14,16 @@ class VolumeController:
     """Controls audio volume using a two-layer approach:
 
     - Coarse: FFmpeg volume filter (set at process start)
-    - Fine: pactl set-sink-input-volume (real-time adjustment)
+    - Fine: pactl set-sink-input-volume (real-time adjustment, Linux only)
 
-    This provides smooth, glitch-free volume transitions.
+    On macOS, only FFmpeg-level volume control is available.
     """
 
     def __init__(self, pulse_sink: str = "ts3bot_sink") -> None:
         self._pulse_sink = pulse_sink
         self._current_volume: int = 70  # 0-100
         self._sink_input_id: str | None = None
+        self._is_macos = platform.system() == "Darwin"
 
     @property
     def volume(self) -> int:
@@ -35,6 +37,11 @@ class VolumeController:
             fade_ms: Fade duration in milliseconds
         """
         target = max(0, min(100, target))
+
+        # On macOS, only FFmpeg-level volume (no pactl)
+        if self._is_macos:
+            self._current_volume = target
+            return
 
         if fade_ms > 0 and self._sink_input_id:
             await self._fade_volume(self._current_volume, target, fade_ms)

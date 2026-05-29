@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+import platform
 from typing import Any, Callable, Coroutine
 
 from bot.core.audio.ffmpeg import FFmpegProcess
@@ -30,7 +31,7 @@ class AudioController:
 
     def __init__(
         self,
-        ffmpeg_path: str = "/usr/bin/ffmpeg",
+        ffmpeg_path: str | None = None,
         pulse_sink: str = "ts3bot_sink",
         default_volume: int = 70,
         fade_duration_ms: int = 500,
@@ -45,6 +46,7 @@ class AudioController:
         self._state = PlaybackState.IDLE
         self._default_volume = default_volume
         self._fade_duration_ms = fade_duration_ms
+        self._is_macos = platform.system() == "Darwin"
 
         # Callbacks
         self._on_playback_stopped: PlaybackCallback | None = None
@@ -82,9 +84,10 @@ class AudioController:
         self._state = PlaybackState.PLAYING
         logger.info("Playback started: %s", url[:80])
 
-        # Refresh sink input for volume control (give FFmpeg a moment to start)
-        await asyncio.sleep(0.5)
-        await self._volume.refresh_sink_input()
+        # Refresh sink input for volume control (Linux only, give FFmpeg a moment to start)
+        if not self._is_macos:
+            await asyncio.sleep(0.5)
+            await self._volume.refresh_sink_input()
 
     async def stop(self) -> None:
         """Stop playback."""

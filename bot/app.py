@@ -52,7 +52,7 @@ class BotApplication:
 
         self.registry = CommandRegistry()
         self.audio = AudioController(
-            ffmpeg_path=self.config.audio.ffmpeg_path,
+            ffmpeg_path=self.config.audio.ffmpeg_path or None,
             pulse_sink=self.config.audio.pulse_sink_name,
             default_volume=self.config.audio.default_volume,
             fade_duration_ms=self.config.audio.fade_duration_ms,
