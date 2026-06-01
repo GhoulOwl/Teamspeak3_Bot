@@ -56,6 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpci3 \
     libxslt1.1 \
     libatomic1 \
+    libxcb-xinput0 \
     # Utilities
     wget \
     bzip2 \

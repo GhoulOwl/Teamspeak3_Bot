@@ -71,6 +71,17 @@ export PULSE_SERVER=unix:/tmp/pulse-native
 
 # ── Start TS3 Client ─────────────────────────────
 echo "Starting TS3 Client..."
+
+# Pre-flight: verify X server is reachable
+echo "DISPLAY=$DISPLAY"
+if xdotool getdisplaygeometry > /dev/null 2>&1; then
+    echo "X server is responsive ($(xdotool getdisplaygeometry))"
+else
+    echo "WARNING: xdotool cannot reach X server on DISPLAY=$DISPLAY"
+    echo "Xvfb process check:"
+    ps aux | grep -v grep | grep Xvfb || echo "  Xvfb NOT running!"
+fi
+
 cd /opt/ts3client
 
 # Find TS3 client binary (try multiple patterns)
@@ -117,10 +128,13 @@ if [ -n "$TS3BIN" ]; then
             echo "ERROR: TS3 client has missing shared libraries:"
             echo "$MISSING"
             echo "Install the missing packages in the Dockerfile and rebuild."
+        else
+            echo "All shared libraries satisfied."
         fi
     fi
 
-    ./"$TS3BIN" > /data/logs/ts3client.log 2>&1 &
+    # Launch with QT_DEBUG_PLUGINS for xcb diagnosis
+    QT_DEBUG_PLUGINS=1 ./"$TS3BIN" > /data/logs/ts3client.log 2>&1 &
     TS3_PID=$!
     sleep 3
 
