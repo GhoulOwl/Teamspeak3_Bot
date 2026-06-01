@@ -204,39 +204,41 @@ class BotApplication:
             return
 
         if entry.is_url:
-            # Re-extract URL via yt-dlp (CDN URLs expire)
+            # Download audio via yt-dlp (CDN URLs expire mid-stream)
             original_url = getattr(entry, "_url", "")
             if original_url:
                 try:
-                    audio_url = await self.netease.extract_url(original_url)
-                    if audio_url:
-                        await self.audio.play(audio_url)
+                    downloaded = await self.netease.download_url(original_url)
+                    if downloaded:
+                        await self.audio.play(
+                            downloaded.path, temp_file=downloaded.path
+                        )
                         await self.sq.reply_to_channel(
                             f"正在播放: {entry.song.display_name} - 点歌: {entry.requester_name}"
                         )
                         return
                 except Exception:
-                    logger.exception("Failed to extract URL")
+                    logger.exception("Failed to download audio")
             await self.sq.reply_to_channel("链接解析失败，跳过")
             await self._on_playback_stopped()
             return
 
-        # Fetch fresh URL via yt-dlp from Netease
+        # Download audio to local temp file via yt-dlp
         try:
-            url = await self.netease.get_song_url(entry.song.id)
+            downloaded = await self.netease.download_song(entry.song.id)
         except Exception:
-            logger.exception("Failed to get song URL")
-            await self.sq.reply_to_channel(f"获取播放链接失败: {entry.song.display_name}")
+            logger.exception("Failed to download song")
+            await self.sq.reply_to_channel(f"下载失败: {entry.song.display_name}")
             await self._on_playback_stopped()
             return
 
-        if not url:
+        if not downloaded:
             await self.sq.reply_to_channel(f"歌曲不可用: {entry.song.display_name}")
             await self._on_playback_stopped()
             return
 
         try:
-            await self.audio.play(url)
+            await self.audio.play(downloaded.path, temp_file=downloaded.path)
             await self.sq.reply_to_channel(
                 f"正在播放: {entry.song.display_name} - 点歌: {entry.requester_name}"
             )

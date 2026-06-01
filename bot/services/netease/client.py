@@ -13,7 +13,7 @@ from datetime import timedelta
 
 from bot.services.netease.cache import TTLCache
 from bot.services.netease.models import Lyrics, Song
-from bot.services.netease.ytdlp import AudioInfo, YtDlpService
+from bot.services.netease.ytdlp import AudioInfo, DownloadedAudio, YtDlpService
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,35 @@ class NeteaseAPIClient:
         """
         netease_url = f"https://music.163.com/song?id={song_id}"
         return await self.extract_url(netease_url)
+
+    async def download_song(
+        self,
+        song_id: int,
+        cache_dir: str | None = None,
+    ) -> DownloadedAudio | None:
+        """Download a Netease song to a local temp file.
+
+        Preferred over get_song_url() because CDN URLs expire mid-stream.
+        """
+        netease_url = f"https://music.163.com/song?id={song_id}"
+        return await self.download_url(netease_url, cache_dir=cache_dir)
+
+    async def download_url(
+        self,
+        url: str,
+        cache_dir: str | None = None,
+    ) -> DownloadedAudio | None:
+        """Download audio from any supported platform to a local temp file."""
+        result = await self._ytdlp.download_audio(url, cache_dir=cache_dir)
+        if result:
+            logger.info(
+                "Downloaded audio: %s (%s, %.0fs) -> %s",
+                result.title,
+                result.source,
+                result.duration,
+                result.path,
+            )
+        return result
 
     async def extract_url(self, url: str) -> str | None:
         """Extract a playable audio URL from any supported platform.

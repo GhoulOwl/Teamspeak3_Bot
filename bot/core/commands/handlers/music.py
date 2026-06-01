@@ -208,35 +208,37 @@ async def _play_next(app: BotApplication) -> None:
         return
 
     if entry.is_url:
-        # Re-extract URL via yt-dlp (CDN URLs expire)
+        # Download audio via yt-dlp (CDN URLs expire mid-stream)
         original_url = getattr(entry, "_url", "")
         if original_url:
             try:
-                audio_url = await app.netease.extract_url(original_url)
-                if audio_url:
-                    await app.audio.play(audio_url)
+                downloaded = await app.netease.download_url(original_url)
+                if downloaded:
+                    await app.audio.play(
+                        downloaded.path, temp_file=downloaded.path
+                    )
                     return
             except Exception:
-                logger.exception("Failed to extract URL: %s", original_url)
+                logger.exception("Failed to download audio: %s", original_url)
 
         await app.sq.reply_to_channel("链接解析失败，跳过")
         await _play_next(app)
         return
 
-    # Fetch fresh URL via yt-dlp from Netease song page
+    # Download audio to local temp file via yt-dlp
     try:
-        url = await app.netease.get_song_url(entry.song.id)
+        downloaded = await app.netease.download_song(entry.song.id)
     except Exception:
-        logger.exception("Failed to get song URL for %d", entry.song.id)
-        await app.sq.reply_to_channel(f"获取播放链接失败: {entry.song.display_name}")
+        logger.exception("Failed to download song %d", entry.song.id)
+        await app.sq.reply_to_channel(f"下载失败: {entry.song.display_name}")
         await _play_next(app)
         return
 
-    if not url:
+    if not downloaded:
         await app.sq.reply_to_channel(
             f"歌曲不可用 (VIP或地区限制): {entry.song.display_name}"
         )
         await _play_next(app)
         return
 
-    await app.audio.play(url)
+    await app.audio.play(downloaded.path, temp_file=downloaded.path)

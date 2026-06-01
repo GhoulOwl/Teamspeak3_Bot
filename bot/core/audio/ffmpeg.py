@@ -89,19 +89,26 @@ class FFmpegProcess:
             await self.stop()
 
         gain = volume / 100.0
+        is_http = url.startswith(("http://", "https://"))
 
-        cmd = [
-            self._ffmpeg_path,
-            "-reconnect", "1",
-            "-reconnect_streamed", "1",
-            "-reconnect_delay_max", "5",
+        cmd = [self._ffmpeg_path]
+
+        # Reconnect flags only apply to HTTP streams
+        if is_http:
+            cmd.extend([
+                "-reconnect", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "5",
+            ])
+
+        cmd.extend([
             "-i", url,
             "-af", f"volume={gain}",
             "-ac", str(self._channels),
             "-ar", str(self._sample_rate),
             "-nostdin",
             "-y",
-        ]
+        ])
 
         if self._is_macos:
             cmd.extend(["-f", "audiotoolbox"])

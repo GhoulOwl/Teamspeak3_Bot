@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+import os
 import platform
 from typing import Any, Callable, Coroutine
 
@@ -48,6 +49,9 @@ class AudioController:
         self._fade_duration_ms = fade_duration_ms
         self._is_macos = platform.system() == "Darwin"
 
+        # Temp file from yt-dlp download (cleaned up after playback)
+        self._current_temp_file: str | None = None
+
         # Callbacks
         self._on_playback_stopped: PlaybackCallback | None = None
         self._on_playback_error: PlaybackCallback | None = None
@@ -69,10 +73,18 @@ class AudioController:
         self._on_playback_stopped = on_stopped
         self._on_playback_error = on_error
 
-    async def play(self, url: str) -> None:
-        """Start playing a URL. Stops any current playback first."""
+    async def play(self, source: str, *, temp_file: str | None = None) -> None:
+        """Start playing a source (URL or local file path).
+
+        Stops any current playback first. If *temp_file* is given it will
+        be deleted once playback finishes or is stopped.
+        """
         if self._state != PlaybackState.IDLE:
             await self.stop()
+
+        # Clean up previous temp file if any
+        self._cleanup_temp_file()
+        self._current_temp_file = temp_file
 
         # Set FFmpeg callbacks
         self._ffmpeg.set_callbacks(
@@ -80,9 +92,9 @@ class AudioController:
             on_error=self._handle_error,
         )
 
-        await self._ffmpeg.start(url, volume=self._volume.volume)
+        await self._ffmpeg.start(source, volume=self._volume.volume)
         self._state = PlaybackState.PLAYING
-        logger.info("Playback started: %s", url[:80])
+        logger.info("Playback started: %s", source[:80])
 
         # Refresh sink input for volume control (Linux only, give FFmpeg a moment to start)
         if not self._is_macos:
@@ -93,6 +105,7 @@ class AudioController:
         """Stop playback."""
         await self._ffmpeg.stop()
         self._state = PlaybackState.IDLE
+        self._cleanup_temp_file()
         logger.info("Playback stopped")
 
     async def pause(self) -> None:
@@ -133,6 +146,7 @@ class AudioController:
     async def _handle_eof(self) -> None:
         """Handle end-of-stream from FFmpeg."""
         self._state = PlaybackState.IDLE
+        self._cleanup_temp_file()
         logger.info("Playback finished (EOF)")
         if self._on_playback_stopped:
             await self._on_playback_stopped()
@@ -140,6 +154,18 @@ class AudioController:
     async def _handle_error(self) -> None:
         """Handle FFmpeg error."""
         self._state = PlaybackState.IDLE
+        self._cleanup_temp_file()
         logger.warning("Playback error")
         if self._on_playback_error:
             await self._on_playback_error()
+
+    def _cleanup_temp_file(self) -> None:
+        """Remove the temp audio file if one exists."""
+        path = self._current_temp_file
+        self._current_temp_file = None
+        if path:
+            try:
+                os.unlink(path)
+                logger.debug("Cleaned up temp file: %s", path)
+            except OSError:
+                pass

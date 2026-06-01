@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import tempfile
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,6 +27,17 @@ class AudioInfo:
     duration: float  # seconds
     thumbnail: str | None = None
     source: str = ""  # e.g., "NetEaseMusic", "Youtube", "BiliBili"
+    original_url: str = ""
+
+
+@dataclass
+class DownloadedAudio:
+    """Result of downloading audio to a local temp file."""
+
+    path: str  # Local file path
+    title: str
+    duration: float
+    source: str = ""
     original_url: str = ""
 
 
@@ -65,6 +78,87 @@ class YtDlpService:
         except Exception:
             logger.exception("yt-dlp extraction failed for %s", url)
             return None
+
+    async def download_audio(
+        self,
+        url: str,
+        cache_dir: str | None = None,
+    ) -> DownloadedAudio | None:
+        """Download audio to a local temp file to avoid CDN URL expiration.
+
+        Args:
+            url: The page/song URL
+            cache_dir: Directory for temp files (default: system temp)
+
+        Returns:
+            DownloadedAudio with local file path, or None on failure
+        """
+        try:
+            return await asyncio.to_thread(self._download_sync, url, cache_dir)
+        except Exception:
+            logger.exception("yt-dlp download failed for %s", url)
+            return None
+
+    def _download_sync(
+        self,
+        url: str,
+        cache_dir: str | None,
+    ) -> DownloadedAudio | None:
+        """Synchronous download (runs in thread pool)."""
+        out_dir = cache_dir or tempfile.gettempdir()
+        os.makedirs(out_dir, exist_ok=True)
+        outtmpl = os.path.join(out_dir, "ts3bot_%(id)s.%(ext)s")
+
+        opts = {
+            **self._base_opts,
+            "skip_download": False,
+            "outtmpl": outtmpl,
+            "noplaylist": True,
+        }
+
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+
+        if not info:
+            return None
+
+        # Find the downloaded file
+        filepath = ydl.prepare_filename(info)
+        if not os.path.isfile(filepath):
+            # Extension might differ after post-processing
+            base = os.path.splitext(filepath)[0]
+            for ext in (".mp3", ".m4a", ".opus", ".ogg", ".webm", ".flac"):
+                candidate = base + ext
+                if os.path.isfile(candidate):
+                    filepath = candidate
+                    break
+            else:
+                logger.error("Downloaded file not found: %s", filepath)
+                return None
+
+        extractor = info.get("extractor", "")
+        source_map = {
+            "NetEaseMusic": "网易云音乐",
+            "Youtube": "YouTube",
+            "BiliBili": "Bilibili",
+            "SoundCloud": "SoundCloud",
+        }
+        source = source_map.get(extractor, extractor)
+
+        logger.info(
+            "Downloaded audio: %s (%.0fs) -> %s",
+            info.get("title", "?"),
+            info.get("duration", 0) or 0,
+            filepath,
+        )
+
+        return DownloadedAudio(
+            path=filepath,
+            title=info.get("title", "Unknown"),
+            duration=info.get("duration", 0) or 0,
+            source=source,
+            original_url=url,
+        )
 
     def _extract_sync(self, url: str) -> AudioInfo | None:
         """Synchronous extraction (runs in thread pool)."""
