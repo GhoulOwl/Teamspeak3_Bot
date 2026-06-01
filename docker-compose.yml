@@ -26,7 +26,7 @@ services:
     shm_size: "256m"
     tmpfs:
       - /tmp:size=100m
-      - /run/user/1000/pulse:size=10m
+      - /run/shm:size=50m
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

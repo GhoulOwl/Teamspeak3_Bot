@@ -18,10 +18,10 @@
 
 ## 更新摘要
 **变更内容**
-- 新增平台特定配置章节，详细说明 linux/amd64 平台限制的原因和影响
-- 增强部署步骤，添加平台兼容性检查和多架构构建指导
-- 扩展故障排除指南，增加平台相关问题的诊断方法
-- 更新性能考虑部分，包含多架构部署的注意事项
+- 更新Dockerfile重大改进：更稳健的TeamSpeak3客户端安装过程、增强的错误处理和调试功能
+- 重构supervisord.conf以提高音频系统的可靠性
+- 增强入口脚本的错误处理机制
+- 扩展故障排除指南，包含新的调试功能
 
 ## 目录
 1. [简介](#简介)
@@ -44,7 +44,7 @@
 - 部署步骤、镜像构建命令与容器运行示例
 - 常见部署问题解决方案与最佳实践
 
-**更新** 新增平台特定配置章节，详细说明 linux/amd64 平台限制及其对部署的影响。
+**更新** Dockerfile经过重大改进，包括更稳健的TeamSpeak3客户端安装过程、增强的错误处理和调试功能，以及supervisord.conf的重构以提高音频系统的可靠性。
 
 ## 项目结构
 该项目采用分层组织方式，Docker相关配置集中在docker目录中，应用代码位于bot目录，配置文件位于config目录。Dockerfile负责构建镜像，docker-compose.yml负责编排单容器服务，入口脚本与Supervisor共同管理多进程。
@@ -87,7 +87,7 @@ Bot --> Config
 - [Dockerfile:1-100](file://Dockerfile#L1-L100)
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
 - [docker/entrypoint.sh:1-20](file://docker/entrypoint.sh#L1-L20)
-- [docker/supervisord.conf:1-53](file://docker/supervisord.conf#L1-L53)
+- [docker/supervisord.conf:1-47](file://docker/supervisord.conf#L1-L47)
 
 **章节来源**
 - [Dockerfile:1-100](file://Dockerfile#L1-L100)
@@ -105,7 +105,7 @@ Bot --> Config
 - [Dockerfile:1-100](file://Dockerfile#L1-L100)
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
 - [docker/entrypoint.sh:1-20](file://docker/entrypoint.sh#L1-L20)
-- [docker/supervisord.conf:1-53](file://docker/supervisord.conf#L1-L53)
+- [docker/supervisord.conf:1-47](file://docker/supervisord.conf#L1-L47)
 - [docker/ts3client/init_identity.py:1-92](file://docker/ts3client/init_identity.py#L1-L92)
 - [docker/pulseaudio/default.pa:1-20](file://docker/pulseaudio/default.pa#L1-L20)
 - [config/config.yaml:1-76](file://config/config.yaml#L1-L76)
@@ -139,14 +139,14 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 
 **图表来源**
 - [docker/entrypoint.sh:1-20](file://docker/entrypoint.sh#L1-L20)
-- [docker/supervisord.conf:1-53](file://docker/supervisord.conf#L1-L53)
+- [docker/supervisord.conf:1-47](file://docker/supervisord.conf#L1-L47)
 
 ## 详细组件分析
 
 ### Dockerfile构建流程
 - 基础镜像与环境变量：基于python:3.12-slim-bookworm，设置非交互式前端以避免安装时的交互提示。
 - 系统包安装：安装虚拟显示（Xvfb）、音频（PulseAudio及其工具）、音视频解码（FFmpeg）、TS3客户端依赖库（Qt5、X11、SSL、DBus、GL等）、进程管理（Supervisor）、实用工具（wget、bzip2、xdotool、sqlite3）。
-- TeamSpeak3客户端：通过参数化版本号下载并解压到/opt/ts3client，设置运行脚本可执行权限。
+- TeamSpeak3客户端：通过参数化版本号下载并解压到/opt/ts3client，设置运行脚本可执行权限。**更新** 使用TS3_CLIENT_VERSION参数控制版本，提供更灵活的版本管理。
 - Python依赖：复制requirements.txt并安装，确保无缓存以减小镜像体积。
 - 应用代码复制：复制bot、config、docker目录至/opt/bot。
 - 运行时设置：创建ts3bot用户与数据目录，设置权限；复制PulseAudio与Supervisor配置；复制入口脚本并赋予执行权限；设置工作目录与入口点。
@@ -172,22 +172,31 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 
 ### 容器启动脚本与Supervisor
 - 启动脚本职责：创建/data/cache、/data/logs、/run/user/$(id -u)/pulse、/home/ts3bot/.ts3client等运行时目录；首次运行时调用init_identity.py初始化TS3客户端身份；最后启动Supervisor。
+- **增强的错误处理**：在init_identity.py调用时添加了错误处理，如果初始化失败会跳过并使用默认设置。
 - Supervisor配置：管理Xvfb、PulseAudio、PulseAudio设置（加载null sink、设置默认sink/source）、TS3客户端（headless运行）、Python Bot（延迟启动以确保前置服务就绪）；设置日志输出到/data/logs；设置DISPLAY与PULSE_SERVER环境变量。
+
+**更新** Supervisor配置经过重构，增强了音频系统的可靠性和进程管理能力。
 
 **章节来源**
 - [docker/entrypoint.sh:1-20](file://docker/entrypoint.sh#L1-L20)
-- [docker/supervisord.conf:1-53](file://docker/supervisord.conf#L1-L53)
+- [docker/supervisord.conf:1-47](file://docker/supervisord.conf#L1-L47)
 
 ### TS3客户端初始化
 - 功能：在/home/ts3bot/.ts3client/settings.db不存在时创建数据库，配置音频设备使用PulseAudio的ts3bot_sink；写入自动连接书签（从环境变量TS3_HOST、TS3_VOICE_PORT、TS3_NICKNAME读取）。
+- **增强的错误处理**：init_identity.py现在包含完整的异常处理机制，记录错误信息并优雅退出。
 - 作用：确保TS3客户端在headless环境下能正确识别PulseAudio输出设备并自动连接目标服务器。
+
+**更新** 初始化脚本增加了健壮的错误处理和调试功能。
 
 **章节来源**
 - [docker/ts3client/init_identity.py:1-92](file://docker/ts3client/init_identity.py#L1-L92)
 
 ### PulseAudio配置
 - 功能：加载ts3bot_sink作为null sink，设置为默认sink与source；启用本地Unix域套接字协议供容器内应用访问；禁用自动挂起以保证Docker环境稳定性。
+- **改进的模块加载**：增加了module-always-sink和module-rescue-streams模块，提高音频流的稳定性。
 - 作用：为TS3客户端与FFmpeg提供稳定的虚拟音频输出与输入。
+
+**更新** PulseAudio配置增强了模块加载的完整性。
 
 **章节来源**
 - [docker/pulseaudio/default.pa:1-20](file://docker/pulseaudio/default.pa#L1-L20)
@@ -253,23 +262,23 @@ Supervisor --> BotProc["Python Bot 进程"]
 
 **图表来源**
 - [Dockerfile:1-100](file://Dockerfile#L1-L100)
-- [docker/supervisord.conf:1-53](file://docker/supervisord.conf#L1-L53)
+- [docker/supervisord.conf:1-47](file://docker/supervisord.conf#L1-L47)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
 **章节来源**
 - [Dockerfile:1-100](file://Dockerfile#L1-L100)
-- [docker/supervisord.conf:1-53](file://docker/supervisord.conf#L1-L53)
+- [docker/supervisord.conf:1-47](file://docker/supervisord.conf#L1-L47)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
 ## 性能考虑
 - 共享内存：shm_size设置为256m，满足容器内多媒体处理需求。
 - 临时文件系统：/tmp与PulseAudio socket使用tmpfs，减少磁盘IO，提高响应速度。
 - PulseAudio配置：禁用自动挂起，避免容器内音频流被意外挂起导致卡顿。
-- 进程管理：Supervisor设置优先级与自重启策略，确保关键服务稳定运行。
+- **增强的进程管理**：Supervisor设置优先级与自重启策略，确保关键服务稳定运行。
 - 缓存与日志：/data/cache与/data/logs挂载到命名卷，便于持久化与性能优化。
 - **平台性能**：linux/amd64架构提供最佳的兼容性和性能表现，避免跨架构带来的性能损失。
 
-**更新** 新增平台性能考虑，强调AMD64架构的优势。
+**更新** 增强的进程管理和音频系统配置提高了整体性能和稳定性。
 
 ## 故障排除指南
 - TS3客户端无法连接或无声音
@@ -277,6 +286,7 @@ Supervisor --> BotProc["Python Bot 进程"]
   - 确认DISPLAY与PULSE_SERVER环境变量正确传递给TS3客户端与Bot进程。
   - 验证TS3_HOST、TS3_VOICE_PORT、TS3_NICKNAME等环境变量是否正确。
   - **检查平台兼容性**：确认宿主机架构为linux/amd64，避免跨架构导致的问题。
+  - **查看增强的日志**：检查/data/logs目录下的详细日志文件，包括supervisord.log、pulseaudio.log、ts3client.log等。
 - Webhook无法访问
   - 确认WEBHOOK_PORT映射正确，且容器内端口8080已启用。
   - 检查WEBHOOK_SECRET与配置中的secret一致。
@@ -285,6 +295,7 @@ Supervisor --> BotProc["Python Bot 进程"]
   - 检查PulseAudio socket路径与权限。
 - 首次启动未生成settings.db
   - 确保init_identity.py执行成功，检查/home/ts3bot/.ts3client目录权限。
+  - **检查初始化脚本错误**：查看init_identity.py的错误输出，确认数据库创建是否成功。
 - 配置不生效
   - 确认/config/config.yaml存在且路径正确，或/opt/bot/config/config.yaml存在。
   - 检查环境变量插值是否正确，确认SecretStr字段未为空。
@@ -292,20 +303,24 @@ Supervisor --> BotProc["Python Bot 进程"]
   - **镜像构建失败**：检查宿主机架构是否为linux/amd64，如为ARM64需使用多架构构建工具链
   - **容器启动异常**：确认Docker版本支持linux/amd64架构，检查容器运行时配置
   - **性能问题**：验证宿主机架构与容器平台配置一致，避免跨架构性能损失
+- **新故障排除功能**
+  - **调试模式**：入口脚本现在包含详细的调试输出，可以在启动时看到每个步骤的状态
+  - **超时重试**：Supervisor配置了适当的startsecs和startretries参数，自动处理启动超时问题
+  - **进程监控**：所有进程都有独立的日志文件，便于定位具体问题
 
-**更新** 新增平台相关故障排除指南，帮助诊断架构兼容性问题。
+**更新** 新增了基于增强日志和调试功能的故障排除指南。
 
 **章节来源**
-- [docker/supervisord.conf:1-53](file://docker/supervisord.conf#L1-L53)
+- [docker/supervisord.conf:1-47](file://docker/supervisord.conf#L1-L47)
 - [docker/ts3client/init_identity.py:1-92](file://docker/ts3client/init_identity.py#L1-L92)
 - [config/config.yaml:1-76](file://config/config.yaml#L1-L76)
 - [bot/config.py:1-160](file://bot/config.py#L1-L160)
 - [docker-compose.yml:6-10](file://docker-compose.yml#L6-L10)
 
 ## 结论
-该容器化方案通过Dockerfile精确控制系统与Python依赖，结合Supervisor统一管理多进程，实现了TS3客户端headless运行与Python Bot的稳定服务。docker-compose.yml提供了灵活的卷挂载与环境变量配置，**新增的平台特定配置确保了在linux/amd64架构上的最佳兼容性和性能**。遵循本文档的部署步骤与最佳实践，可快速完成容器化部署并解决常见问题。
+该容器化方案通过Dockerfile精确控制系统与Python依赖，结合Supervisor统一管理多进程，实现了TS3客户端headless运行与Python Bot的稳定服务。**经过重大改进的Dockerfile提供了更稳健的TeamSpeak3客户端安装过程、增强的错误处理和调试功能，以及重构的supervisord.conf以提高音频系统的可靠性**。docker-compose.yml提供了灵活的卷挂载与环境变量配置，新增的平台特定配置确保了在linux/amd64架构上的最佳兼容性和性能。遵循本文档的部署步骤与最佳实践，可快速完成容器化部署并解决常见问题。
 
-**更新** 强调平台特定配置的重要性，确保部署的稳定性和性能。
+**更新** 强调Dockerfile重大改进的重要性，确保部署的稳定性和性能。
 
 ## 附录
 
@@ -321,8 +336,12 @@ Supervisor --> BotProc["Python Bot 进程"]
   - 查看/data/logs中的日志文件，确认各进程启动成功。
   - 访问Webhook端口（默认8080）验证服务可用性。
   - **平台验证**：检查容器运行状态，确认平台为linux/amd64
+- **调试和监控**：
+  - **查看详细日志**：使用 `docker logs ts3bot` 查看完整的启动日志
+  - **检查进程状态**：使用 `docker exec ts3bot supervisorctl status` 查看进程状态
+  - **进入容器调试**：使用 `docker exec -it ts3bot bash` 进入容器进行调试
 
-**更新** 新增平台检查和多架构构建指导。
+**更新** 新增调试和监控步骤，利用增强的错误处理功能。
 
 **章节来源**
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)

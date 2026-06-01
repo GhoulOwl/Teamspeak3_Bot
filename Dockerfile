@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Audio
     pulseaudio \
     pulseaudio-utils \
+    libpulse0 \
     # Audio/video decoding
     ffmpeg \
     # TS3 client dependencies (Qt5, X11, SSL, etc.)
@@ -49,8 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 \
     libegl1 \
     libgl1 \
-    # Process manager
-    supervisor \
+    # Process manager (removed - using direct process management)
     # Utilities
     wget \
     bzip2 \
@@ -67,12 +67,9 @@ RUN wget -q "https://files.teamspeak-services.com/releases/client/${TS3_CLIENT_V
     && chmod +x /tmp/ts3client.run \
     && echo "y" | /tmp/ts3client.run --noexec --target /tmp/ts3client_extract \
     && mkdir -p /opt/ts3client \
-    && cp -r /tmp/ts3client_extract/TeamSpeak3-Client-linux_amd64/* /opt/ts3client/ \
+    && cp -r /tmp/ts3client_extract/*/ /opt/ts3client/ \
+    && find /opt/ts3client -name "*.sh" -exec chmod +x {} \; \
     && rm -rf /tmp/ts3client.run /tmp/ts3client_extract
-
-# Make TS3 client scripts executable
-RUN chmod +x /opt/ts3client/ts3client_runscript.sh && \
-    ls -la /opt/ts3client/
 
 # ── Python dependencies ──────────────────────────
 COPY requirements.txt /opt/bot/requirements.txt
@@ -91,7 +88,6 @@ RUN useradd -m -s /bin/bash ts3bot \
 
 # PulseAudio config
 COPY docker/pulseaudio/default.pa /etc/pulse/default.pa
-COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Entrypoint
 COPY docker/entrypoint.sh /entrypoint.sh
