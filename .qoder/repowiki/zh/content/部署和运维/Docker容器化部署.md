@@ -14,9 +14,10 @@
 
 ## 更新摘要
 **变更内容**
-- Dockerfile新增X11输入处理和显示管理依赖，包括libxcb、libx11、libxrender、libxrandr、libxfixes等完整X11生态系统支持
+- Dockerfile新增OpenSSL 1.1兼容性支持，解决Debian Bookworm中OpenSSL 3.x与TeamSpeak 3客户端的ABI兼容性问题
+- 增强的X11输入处理和显示管理依赖，包括完整的libxcb生态系统支持（libxcb1、libx11-6、libxrender1等）
 - entrypoint.sh实现X服务器可达性验证，使用xdotool检查DISPLAY环境变量配置的X服务器响应性
-- 增强共享库检测逻辑，改进TS3客户端启动前的依赖检查和错误诊断
+- 改进的共享库检测逻辑，增强TS3客户端启动前的依赖检查和错误诊断
 - 完全移除Supervisor依赖，采用直接bash脚本管理所有进程，简化了进程管理架构
 - 改进TS3客户端启动过程，增强二进制文件查找策略和多级回退机制
 - 优化PulseAudio配置，提供更好的容器内音频支持和资源管理
@@ -42,7 +43,7 @@
 - 部署步骤、镜像构建命令与容器运行示例
 - 常见部署问题解决方案与最佳实践
 
-**更新** Dockerfile经过重大改进，新增了完整的X11输入处理和显示管理依赖，entrypoint.sh实现了X服务器可达性验证和增强的共享库检测，完全移除了Supervisor依赖，采用直接bash脚本管理进程。
+**更新** Dockerfile经过重大改进，新增了OpenSSL 1.1兼容性支持和完整的X11输入处理和显示管理依赖，entrypoint.sh实现了X服务器可达性验证和增强的共享库检测，完全移除了Supervisor依赖，采用直接bash脚本管理进程。
 
 ## 项目结构
 该项目采用分层组织方式，Docker相关配置集中在docker目录中，应用代码位于bot目录，配置文件位于config目录。Dockerfile负责构建镜像，docker-compose.yml负责编排单容器服务，入口脚本直接管理多进程。
@@ -82,30 +83,32 @@ Bot --> Config
 ```
 
 **图表来源**
-- [Dockerfile:1-141](file://Dockerfile#L1-L141)
+- [Dockerfile:1-150](file://Dockerfile#L1-L150)
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
-- [docker/entrypoint.sh:1-166](file://docker/entrypoint.sh#L1-L166)
+- [docker/entrypoint.sh:1-169](file://docker/entrypoint.sh#L1-L169)
 
 **章节来源**
-- [Dockerfile:1-141](file://Dockerfile#L1-L141)
+- [Dockerfile:1-150](file://Dockerfile#L1-L150)
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
 
 ## 核心组件
 - **直接进程管理脚本**：在容器启动时初始化目录与TS3客户端身份，然后通过bash脚本直接管理Xvfb、PulseAudio、TS3客户端与Python Bot进程。**更新** 完全移除了Supervisor依赖，采用更简洁的进程管理方式。
+- **OpenSSL 1.1兼容性支持**：**新增功能** Dockerfile现在包含专门的OpenSSL 1.1安装步骤，解决Debian Bookworm中OpenSSL 3.x与TeamSpeak 3客户端的ABI兼容性问题，确保TS3客户端能够正常运行。
+- **增强的X11输入处理**：**新增功能** 完整的X11生态系统支持，包括libxcb、libx11、libxrender、libxrandr、libxfixes等依赖，提供更好的图形处理能力和TeamSpeak 3客户端兼容性。
 - **X服务器可达性验证**：entrypoint.sh现在包含X服务器响应性检查功能，使用xdotool验证DISPLAY环境变量配置的X服务器是否可访问，确保容器内虚拟显示正常工作。
 - **增强的共享库检测**：改进的TS3客户端启动过程包含多级共享库检查，使用ldd命令验证所有必需的共享库是否可用，提供详细的错误诊断信息。
 - **改进的TS3客户端检测逻辑**：入口脚本现在包含多种TS3客户端二进制文件的查找策略，支持多种命名模式和回退机制，包括精确匹配、通配符搜索和ELF二进制文件检测。
 - **改进的PulseAudio配置**：使用用户模式启动PulseAudio，提供更好的容器内音频支持和资源管理，避免了系统模式的权限问题。
 - **TS3客户端初始化脚本**：在首次运行时生成settings.db，配置音频设备使用PulseAudio的null sink，并写入自动连接书签。
 - **应用配置**：通过YAML配置文件与环境变量插值，支持TS3、音频、网易云音乐、AI聊天、自动化、调度、Webhook与日志等模块。
-- **Dockerfile**：定义基础镜像、系统依赖、Python依赖、应用代码复制、用户与权限、PulseAudio配置以及入口点。**更新** 新增了完整的X11输入处理和显示管理依赖，移除了process manager依赖，简化了镜像构建过程。
+- **Dockerfile**：定义基础镜像、系统依赖、Python依赖、应用代码复制、用户与权限、PulseAudio配置以及入口点。**更新** 新增了OpenSSL 1.1兼容性支持和完整的X11输入处理和显示管理依赖，移除了process manager依赖，简化了镜像构建过程。
 
 **章节来源**
-- [docker/entrypoint.sh:1-166](file://docker/entrypoint.sh#L1-L166)
+- [docker/entrypoint.sh:1-169](file://docker/entrypoint.sh#L1-L169)
 - [docker/ts3client/init_identity.py:1-92](file://docker/ts3client/init_identity.py#L1-L92)
 - [docker/pulseaudio/default.pa:1-20](file://docker/pulseaudio/default.pa#L1-L20)
 - [config/config.yaml:1-76](file://config/config.yaml#L1-L76)
-- [Dockerfile:1-141](file://Dockerfile#L1-L141)
+- [Dockerfile:1-150](file://Dockerfile#L1-L150)
 
 ## 架构总览
 容器内采用直接bash脚本管理多个子进程，确保各组件按序启动与自愈。TS3客户端通过headless模式运行，配合PulseAudio的null sink实现无显示器音频播放。Python Bot通过FastAPI提供Webhook服务（可选），并通过ServerQuery与TS3服务器交互。
@@ -124,6 +127,7 @@ User->>Dockerfile : 下载TS3客户端安装包
 Dockerfile->>Dockerfile : 手动复制TS3安装包到镜像
 Dockerfile->>Dockerfile : 安装X11输入处理依赖
 Dockerfile->>Dockerfile : 解析并安装TS3客户端
+Dockerfile->>Dockerfile : 安装OpenSSL 1.1兼容性支持
 Entrypoint->>Entrypoint : 创建运行时目录
 Entrypoint->>Entrypoint : 初始化TS3客户端身份
 Entrypoint->>Entrypoint : 验证X服务器可达性
@@ -138,13 +142,14 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 ```
 
 **图表来源**
-- [docker/entrypoint.sh:1-166](file://docker/entrypoint.sh#L1-L166)
+- [docker/entrypoint.sh:1-169](file://docker/entrypoint.sh#L1-L169)
 
 ## 详细组件分析
 
 ### Dockerfile构建流程
 - 基础镜像与环境变量：基于python:3.12-slim-bookworm，设置非交互式前端以避免安装时的交互提示。
 - **系统包安装**：安装虚拟显示（Xvfb）、音频（PulseAudio及其工具）、音视频解码（FFmpeg）、**新增X11输入处理和显示管理依赖**（libxcb1、libx11-6、libxrender1、libxrandr2、libxfixes3、libxcb-xinerama0、libxcb-image0、libxcb-keysyms1、libxcb-render-util0、libxcb-icccm4、libxcb-sync1、libxcb-xkb1、libxkbcommon0、libxkbcommon-x11-0、libfontconfig1、libfreetype6、libdbus-1-3、libnss3、libasound2、libxcursor1、libxcomposite1、libxi6、libxtst6、libxkbfile1、libxcb-cursor0、libxcb-shape0、libxcb-xfixes0、libxcb-glx0、libxcb-dri2-0、libxcb-dri3-0、libxcb-present0、libxshmfence1、libdrm2、libgbm1、libegl1、libgl1）、TS3客户端运行时依赖（libevent-2.1-7、libxdamage1、libpci3、libxslt1.1、libatomic1、libxcb-xinput0）、实用工具（wget、bzip2、xdotool、sqlite3、dbus）。
+- **OpenSSL 1.1兼容性支持**：**新增功能** 由于Debian Bookworm默认提供OpenSSL 3.x，而TeamSpeak 3客户端是针对OpenSSL 1.x构建的，Dockerfile现在包含专门的兼容性支持。通过从Debian Bullseye安全仓库安装libssl1.1，确保TS3客户端能够正常运行，解决ABI兼容性问题。
 - **移除的依赖**：process manager（Supervisor）已被移除，简化了镜像构建过程。
 - **TeamSpeak3客户端**：**重大变更** 现在采用手动下载安装方式。用户需要先从TeamSpeak官网下载对应版本的安装包，然后将其放在项目根目录下，Dockerfile会自动复制并安装。这种方式提供了更好的版本控制和下载源控制。
 - **TS3客户端安装流程**：
@@ -159,7 +164,7 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 - 运行时设置：创建ts3bot用户与数据目录，设置权限；复制PulseAudio配置；复制入口脚本并赋予执行权限；设置工作目录与入口点。
 
 **章节来源**
-- [Dockerfile:1-141](file://Dockerfile#L1-L141)
+- [Dockerfile:1-150](file://Dockerfile#L1-L150)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
 ### docker-compose.yml服务编排
@@ -187,7 +192,7 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 **更新** 完全移除了Supervisor依赖，采用直接bash脚本管理进程，提供了更简洁的进程管理方式。
 
 **章节来源**
-- [docker/entrypoint.sh:1-166](file://docker/entrypoint.sh#L1-L166)
+- [docker/entrypoint.sh:1-169](file://docker/entrypoint.sh#L1-L169)
 
 ### TS3客户端初始化
 - 功能：在/home/ts3bot/.ts3client/settings.db不存在时创建数据库，配置音频设备使用PulseAudio的ts3bot_sink；写入自动连接书签（从环境变量TS3_HOST、TS3_VOICE_PORT、TS3_NICKNAME读取）。
@@ -228,6 +233,7 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 - **FFmpeg编译依赖**：FFmpeg在不同架构上的编译配置和可用性存在差异
 - **Xvfb虚拟显示**：虚拟显示服务在非标准架构上的稳定性有待验证
 - **X11输入处理**：新增的完整X11生态系统依赖在非AMD64架构上可能存在兼容性问题
+- **OpenSSL兼容性**：OpenSSL 1.1兼容性支持是针对特定架构的解决方案
 
 ### 平台配置详解
 docker-compose.yml中的平台配置包含两个关键字段：
@@ -256,6 +262,7 @@ Dockerfile["Dockerfile 构建镜像"] --> SysPkgs["系统包依赖"]
 Dockerfile --> PyDeps["Python依赖"]
 Dockerfile --> AppCopy["应用代码复制"]
 Dockerfile --> TS3Manual["手动TS3安装包"]
+Dockerfile --> OpenSSLCompat["OpenSSL 1.1兼容性"]
 AppCopy --> Bot["Python Bot 应用"]
 Bot --> Config["配置加载"]
 Bot --> TS3["TS3 ServerQuery"]
@@ -267,13 +274,13 @@ TS3Client --> BotProc["Python Bot 进程"]
 ```
 
 **图表来源**
-- [Dockerfile:1-141](file://Dockerfile#L1-L141)
-- [docker/entrypoint.sh:1-166](file://docker/entrypoint.sh#L1-L166)
+- [Dockerfile:1-150](file://Dockerfile#L1-L150)
+- [docker/entrypoint.sh:1-169](file://docker/entrypoint.sh#L1-L169)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
 **章节来源**
-- [Dockerfile:1-141](file://Dockerfile#L1-L141)
-- [docker/entrypoint.sh:1-166](file://docker/entrypoint.sh#L1-L166)
+- [Dockerfile:1-150](file://Dockerfile#L1-L150)
+- [docker/entrypoint.sh:1-169](file://docker/entrypoint.sh#L1-L169)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
 ## 性能考虑
@@ -281,7 +288,8 @@ TS3Client --> BotProc["Python Bot 进程"]
 - 临时文件系统：/tmp与PulseAudio socket使用tmpfs，减少磁盘IO，提高响应速度。
 - **改进的PulseAudio配置**：用户模式启动提供更好的资源管理和音频稳定性。
 - **直接进程管理**：移除了Supervisor的额外开销，减少了进程间通信的复杂性。
-- **X11输入处理优化**：新增的完整X11生态系统依赖提供了更好的图形处理能力。
+- **增强的X11输入处理**：新增的完整X11生态系统依赖提供了更好的图形处理能力。
+- **OpenSSL 1.1兼容性**：专门的兼容性支持确保TS3客户端稳定运行，避免因库版本不兼容导致的性能问题。
 - **增强的共享库检测**：改进的TS3客户端启动过程减少了不必要的启动尝试和错误重试。
 - 缓存与日志：/data/cache与/data/logs挂载到命名卷，便于持久化与性能优化。
 - **平台性能**：linux/amd64架构提供最佳的兼容性和性能表现，避免跨架构带来的性能损失。
@@ -295,6 +303,7 @@ TS3Client --> BotProc["Python Bot 进程"]
   - 验证TS3_HOST、TS3_VOICE_PORT、TS3_NICKNAME等环境变量是否正确。
   - **X服务器可达性问题**：**新增** 检查entrypoint.sh中的xdotool输出，确认X服务器响应性验证是否通过。
   - **共享库缺失问题**：**新增** 检查TS3客户端启动前的共享库检测输出，确认所有必需的共享库是否可用。
+  - **OpenSSL兼容性问题**：**新增** 检查OpenSSL 1.1兼容性安装是否成功，确认libssl1.1是否正确安装。
   - **检查平台兼容性**：确认宿主机架构为linux/amd64，避免跨架构导致的问题。
   - **查看增强的日志**：检查/data/logs目录下的详细日志文件，包括pulseaudio.log、ts3client.log等。
   - **TS3客户端检测问题**：如果TS3客户端无法启动，检查入口脚本的二进制文件查找逻辑和调试输出。
@@ -322,20 +331,21 @@ TS3Client --> BotProc["Python Bot 进程"]
   - **增强的TS3检测**：入口脚本现在提供详细的TS3客户端二进制文件查找调试信息
   - **X服务器验证**：**新增** 检查X服务器可达性验证输出，确认DISPLAY环境变量配置正确
   - **共享库诊断**：**新增** 检查共享库检测输出，确认所有必需的共享库都已安装
+  - **OpenSSL兼容性诊断**：**新增** 检查OpenSSL 1.1兼容性安装状态，确认TS3客户端能够正常运行
   - **手动安装包验证**：**新增** 检查/opt/ts3client目录下的TS3客户端文件完整性
 
-**更新** 新增了基于直接进程管理和用户模式音频的故障排除指南，以及手动TS3安装包相关的故障排除步骤。
+**更新** 新增了基于直接进程管理和用户模式音频的故障排除指南，以及手动TS3安装包和OpenSSL兼容性相关的故障排除步骤。
 
 **章节来源**
-- [docker/entrypoint.sh:1-166](file://docker/entrypoint.sh#L1-L166)
+- [docker/entrypoint.sh:1-169](file://docker/entrypoint.sh#L1-L169)
 - [docker/ts3client/init_identity.py:1-92](file://docker/ts3client/init_identity.py#L1-L92)
 - [config/config.yaml:1-76](file://config/config.yaml#L1-L76)
 - [docker-compose.yml:6-10](file://docker-compose.yml#L6-L10)
 
 ## 结论
-该容器化方案通过Dockerfile精确控制系统与Python依赖，结合直接bash脚本管理多进程，实现了TS3客户端headless运行与Python Bot的稳定服务。**经过重大改进的Dockerfile新增了完整的X11输入处理和显示管理依赖，entrypoint.sh实现了X服务器可达性验证和增强的共享库检测，完全移除了Supervisor依赖，采用直接bash脚本管理进程**。特别重要的是，TeamSpeak客户端安装流程已从自动下载改为手动下载，这种方式提供了更好的版本控制和下载源控制，用户可以精确选择所需的TS3客户端版本。docker-compose.yml提供了灵活的卷挂载与环境变量配置，新增的平台特定配置确保了在linux/amd64架构上的最佳兼容性和性能。遵循本文档的部署步骤与最佳实践，可快速完成容器化部署并解决常见问题。
+该容器化方案通过Dockerfile精确控制系统与Python依赖，结合直接bash脚本管理多进程，实现了TS3客户端headless运行与Python Bot的稳定服务。**经过重大改进的Dockerfile新增了OpenSSL 1.1兼容性支持和完整的X11输入处理和显示管理依赖，entrypoint.sh实现了X服务器可达性验证和增强的共享库检测，完全移除了Supervisor依赖，采用直接bash脚本管理进程**。特别重要的是，TeamSpeak客户端安装流程已从自动下载改为手动下载，这种方式提供了更好的版本控制和下载源控制，用户可以精确选择所需的TS3客户端版本。docker-compose.yml提供了灵活的卷挂载与环境变量配置，新增的平台特定配置确保了在linux/amd64架构上的最佳兼容性和性能。遵循本文档的部署步骤与最佳实践，可快速完成容器化部署并解决常见问题。
 
-**更新** 强调Dockerfile重大改进的重要性，特别是手动TS3客户端安装流程的优势和新增的X11生态系统支持，确保部署的稳定性和性能。
+**更新** 强调Dockerfile重大改进的重要性，特别是手动TS3客户端安装流程的优势、新增的X11生态系统支持和OpenSSL 1.1兼容性支持，确保部署的稳定性和性能。
 
 ## 附录
 
@@ -349,6 +359,7 @@ TS3Client --> BotProc["Python Bot 进程"]
 - 构建镜像：
   - 使用Dockerfile在仓库根目录构建镜像，自动应用平台配置
   - **注意**：构建过程中会自动复制并安装TS3客户端安装包
+  - **OpenSSL兼容性**：构建过程会自动安装OpenSSL 1.1兼容性支持
 - 运行容器：
   - 使用docker-compose启动服务，确保卷与端口映射正确。
   - **多架构构建**：如需在ARM64上构建，使用 `docker buildx build --platform linux/amd64 -t ts3bot .`
@@ -363,10 +374,11 @@ TS3Client --> BotProc["Python Bot 进程"]
   - **TS3客户端调试**：如果TS3客户端启动有问题，查看入口脚本的二进制文件查找调试输出
   - **X服务器验证**：**新增** 检查X服务器可达性验证输出，确认DISPLAY环境变量配置正确
   - **共享库诊断**：**新增** 检查共享库检测输出，确认所有必需的共享库都已安装
+  - **OpenSSL兼容性诊断**：**新增** 检查OpenSSL 1.1兼容性安装状态，确认TS3客户端能够正常运行
   - **手动安装包验证**：**新增** 检查/opt/ts3client目录下的TS3客户端文件完整性
 
-**更新** 新增了TS3客户端手动安装包准备步骤，这是本次重大变更的核心内容。
+**更新** 新增了TS3客户端手动安装包准备步骤和OpenSSL兼容性相关的部署指导。
 
 **章节来源**
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
-- [Dockerfile:68-103](file://Dockerfile#L68-L103)
+- [Dockerfile:68-112](file://Dockerfile#L68-L112)

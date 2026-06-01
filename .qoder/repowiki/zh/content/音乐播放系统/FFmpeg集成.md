@@ -6,7 +6,7 @@
 - [controller.py](file://bot/core/audio/controller.py)
 - [volume.py](file://bot/core/audio/volume.py)
 - [music.py](file://bot/core/commands/handlers/music.py)
-- [manager.py](file://bot/services/queue/manager.py)
+- [ytdlp.py](file://bot/services/netease/ytdlp.py)
 - [app.py](file://bot/app.py)
 - [config.py](file://bot/config.py)
 - [config.yaml](file://config/config.yaml)
@@ -18,6 +18,9 @@
 
 ## 更新摘要
 **变更内容**
+- **智能网络重连参数应用**：FFmpeg 集成现在根据源类型智能应用网络重连参数，HTTP流使用重连参数优化稳定性，本地文件直接播放无需重连
+- **HTTP流优化**：针对HTTP流自动添加 `-reconnect 1`、`-reconnect_streamed 1`、`-reconnect_delay_max 5` 参数，提升网络不稳定场景下的播放稳定性
+- **本地文件性能优化**：本地文件播放时跳过网络重连参数，减少不必要的开销，提升播放速度
 - **改进的FFmpeg错误处理和调试能力**：新增stderr行缓冲机制，用于故障诊断和问题排查
 - **PULSE_SERVER环境变量支持**：在Docker入口脚本中设置PULSE_SERVER环境变量为`unix:/tmp/pulse-native`
 - **增强PulseAudio服务器检测逻辑**：改进了`_check_pulse_available()`方法，增加了Unix socket连接测试
@@ -40,6 +43,7 @@
 
 ## 简介
 本技术文档聚焦于FFmpeg集成模块，系统性阐述 FFmpegProcess 类的架构设计与实现原理，覆盖以下关键主题：
+- **智能源类型检测**：根据URL类型自动应用相应的FFmpeg参数配置，HTTP流启用网络重连，本地文件直接播放
 - **跨平台FFmpeg集成**：支持Linux PulseAudio和macOS AudioToolbox的自动检测与配置
 - **PULSE_SERVER环境变量优化**：改进PulseAudio连接配置，使用稳定的本地套接字连接
 - **增强的错误处理机制**：新增stderr行缓冲机制，提供详细的故障诊断信息
@@ -66,6 +70,7 @@ subgraph "业务层"
 MQ["MusicQueue<br/>bot/services/queue/manager.py"]
 CMD["音乐命令处理器<br/>bot/core/commands/handlers/music.py"]
 APP["BotApplication<br/>bot/app.py"]
+YT["YtDlpService<br/>bot/services/netease/ytdlp.py"]
 end
 subgraph "配置与环境"
 CFG["配置加载<br/>bot/config.py"]
@@ -89,6 +94,7 @@ DC --> ENV
 DC --> PA
 DC --> END
 DC --> DF
+CMD --> YT
 ```
 
 **图表来源**
@@ -103,17 +109,18 @@ DC --> DF
 - [Dockerfile:94-96](file://Dockerfile#L94-L96)
 
 ## 核心组件
-- **FFmpegProcess**：封装单个 FFmpeg 子进程的创建、运行、监控与终止，负责将音频流解码并输出到平台特定的音频系统（Linux: PulseAudio, macOS: AudioToolbox）。**更新**：新增stderr行缓冲机制，提供详细的故障诊断信息。
+- **FFmpegProcess**：封装单个 FFmpeg 子进程的创建、运行、监控与终止，负责将音频流解码并输出到平台特定的音频系统（Linux: PulseAudio, macOS: AudioToolbox）。**更新**：新增智能源类型检测，根据URL类型自动应用网络重连参数。
 - **AudioController**：高层控制器，协调 FFmpeg 生命周期、音量控制与状态机，并向应用层发出播放完成/错误事件。
 - **VolumeController**：双层音量控制（FFmpeg 增益 + 平台特定音量控制），提供平滑淡入淡出过渡。
 - **MusicQueue**：多用户点歌队列，支持跳过投票、重复模式与历史记录。
 - **BotApplication**：应用编排者，注册命令、事件与后台服务，驱动播放流程并在 EOF/错误时自动播放下一首。
+- **YtDlpService**：yt-dlp集成服务，负责从各种平台提取音频URL和下载音频文件。
 
 **章节来源**
 - [ffmpeg.py:18-175](file://bot/core/audio/ffmpeg.py#L18-L175)
 - [controller.py:25-146](file://bot/core/audio/controller.py#L25-L146)
 - [volume.py:13-120](file://bot/core/audio/volume.py#L13-L120)
-- [manager.py:35-204](file://bot/services/queue/manager.py#L35-L204)
+- [ytdlp.py:44-200](file://bot/services/netease/ytdlp.py#L44-L200)
 - [app.py:27-348](file://bot/app.py#L27-L348)
 
 ## 架构总览
@@ -133,9 +140,10 @@ CMD->>APP : "获取音频URL"
 APP->>MQ : "添加到队列"
 CMD->>AC : "play(url)"
 AC->>FF : "start(url, volume)"
+Note over FF : "智能源类型检测"
+FF->>FF : "HTTP流 : 添加重连参数"
+FF->>FF : "本地文件 : 直接播放"
 Note over FF : "平台检测 : Darwin?"
-FF->>FF : "Linux : -f pulse<br/>macOS : -f audiotoolbox"
-Note over FF : "PULSE_SERVER=unix : /tmp/pulse-native"
 FF-->>AC : "stderr监控(日志/EOF/错误)"
 AC-->>APP : "on_stopped/on_error"
 APP->>MQ : "next()"
@@ -160,7 +168,10 @@ APP->>AC : "play(next_url)"
   - **更新**：平台检测标志 `_is_macos` 用于区分Linux和macOS，使用 `platform.system() == "Darwin"` 进行统一检测。
   - **更新**：新增stderr行缓冲机制，通过`_stderr_lines`列表存储最近的stderr输出，最多保留50行用于故障诊断。
 - **启动流程**
-  - 构建命令行参数：重连策略、输入源、音量滤镜、输出格式与目标接收器、采样率/声道、禁用交互等。
+  - **更新**：智能源类型检测：使用 `url.startswith(("http://", "https://"))` 判断是否为HTTP流。
+  - **更新**：HTTP流自动应用重连参数：`-reconnect 1`、`-reconnect_streamed 1`、`-reconnect_delay_max 5`。
+  - **更新**：本地文件直接播放，跳过网络重连参数，提升性能。
+  - 构建命令行参数：根据源类型选择性添加重连参数、输入源、音量滤镜、输出格式与目标接收器、采样率/声道、禁用交互等。
   - **更新**：根据平台选择输出格式：Linux使用 `-f pulse`，macOS使用 `-f audiotoolbox`。
   - **更新**：Linux平台使用优化的PulseAudio服务器参数`-server unix:/tmp/pulse-native`，确保与PULSE_SERVER环境变量的一致性。
   - 使用 asyncio 子进程接口创建进程，并启动 stderr 监控任务。
@@ -307,9 +318,10 @@ participant FF as "FFmpegProcess"
 CMD->>MQ : "添加条目"
 CMD->>AC : "play(url)"
 AC->>FF : "start(url, volume)"
+Note over FF : "智能源类型检测"
+FF->>FF : "HTTP流 : 添加重连参数"
+FF->>FF : "本地文件 : 直接播放"
 Note over FF : "平台检测 : Darwin?"
-FF->>FF : "Linux : -f pulse<br/>macOS : -f audiotoolbox"
-Note over FF : "PULSE_SERVER=unix : /tmp/pulse-native"
 FF-->>AC : "EOF/错误回调"
 AC-->>APP : "on_stopped/on_error"
 APP->>MQ : "next()"
@@ -319,14 +331,32 @@ APP->>AC : "play(next_url)"
 **图表来源**
 - [music.py:20-93](file://bot/core/commands/handlers/music.py#L20-L93)
 - [app.py:199-253](file://bot/app.py#L199-L253)
-- [manager.py:90-119](file://bot/services/queue/manager.py#L90-L119)
+- [ytdlp.py:66-100](file://bot/services/netease/ytdlp.py#L66-L100)
 
 **章节来源**
 - [music.py:17-243](file://bot/core/commands/handlers/music.py#L17-L243)
 - [app.py:199-253](file://bot/app.py#L199-L253)
-- [manager.py:35-204](file://bot/services/queue/manager.py#L35-L204)
+- [ytdlp.py:44-200](file://bot/services/netease/ytdlp.py#L44-L200)
 
 ## 跨平台支持详解
+
+### 智能源类型检测与参数优化
+**更新**：FFmpeg集成模块实现了智能的源类型检测，通过以下机制实现：
+
+- **源类型检测**
+  - 使用 `url.startswith(("http://", "https://"))` 检测HTTP流
+  - 本地文件路径自动识别，跳过网络重连参数
+  - 为不同源类型提供最优的FFmpeg参数配置
+
+- **HTTP流优化**
+  - **自动重连参数**：`-reconnect 1`、`-reconnect_streamed 1`、`-reconnect_delay_max 5`
+  - **网络稳定性提升**：在连接中断时自动重连，最大延迟5秒
+  - **流式重连支持**：专门针对HTTP流媒体的重连机制
+
+- **本地文件性能优化**
+  - **直接播放**：跳过网络重连参数，减少启动开销
+  - **更快响应**：本地文件播放时无需网络重连等待
+  - **资源节省**：避免不必要的网络连接和重连逻辑
 
 ### 平台检测与自动配置
 FFmpeg集成模块实现了智能的跨平台支持，通过以下机制实现：
@@ -436,6 +466,8 @@ FF --> CFG["BotConfig"]
 CFG --> YAML["config.yaml"]
 APP --> DC["Docker配置"]
 DC --> ENV["PULSE_SERVER环境变量"]
+CMD --> YT["YtDlpService"]
+YT --> FF
 ```
 
 **图表来源**
@@ -463,6 +495,11 @@ DC --> ENV["PULSE_SERVER环境变量"]
   - **更新**：Linux平台的音量控制使用pactl，macOS平台直接使用FFmpeg，减少不必要的系统调用。
   - **更新**：PULSE_SERVER环境变量优化了PulseAudio连接性能，减少连接建立时间。
   - **更新**：增强的PulseAudio检测逻辑，Unix socket连接测试提高服务器可用性检测效率。
+  - **更新**：智能源类型检测，HTTP流启用重连参数，本地文件跳过重连参数，提升整体性能。
+- **网络重连优化**
+  - **更新**：HTTP流自动应用重连参数，提升网络不稳定场景下的播放稳定性。
+  - **更新**：本地文件直接播放，跳过网络重连参数，减少启动时间和系统开销。
+  - **更新**：重连延迟设置为5秒，平衡重连效果与系统负载。
 
 ## 故障排除指南
 - **FFmpeg 无法启动**
@@ -490,6 +527,14 @@ DC --> ENV["PULSE_SERVER环境变量"]
   - **更新**：验证PulseAudio本地协议模块是否正确加载。
   - **更新**：确认PulseAudio服务器套接字文件存在且可访问。
   - **更新**：使用增强的检测逻辑，测试Unix socket连接可用性。
+- **HTTP流播放不稳定**
+  - **更新**：检查网络连接质量，确认重连参数已正确应用。
+  - **更新**：验证HTTP流地址的有效性和可访问性。
+  - **更新**：查看stderr日志中的网络重连相关信息。
+- **本地文件播放缓慢**
+  - **更新**：确认文件路径有效且可访问。
+  - **更新**：检查文件大小和格式，确认适合直接播放。
+  - **更新**：验证本地文件播放时未意外应用网络重连参数。
 - **错误诊断和日志分析**
   - **更新**：查看stderr缓冲区中的详细错误信息，包含完整的错误上下文。
   - **更新**：利用增强的错误处理机制，快速定位问题根因。
@@ -504,15 +549,17 @@ DC --> ENV["PULSE_SERVER环境变量"]
 ## 结论
 本集成方案通过清晰的分层设计与异步化实现，提供了稳定可靠的跨平台音频播放能力。FFmpegProcess 负责底层进程与流处理，支持Linux PulseAudio和macOS AudioToolbox的自动检测与配置；AudioController 提供高层状态与事件管理；VolumeController 实现平台特定的平滑音量控制；BotApplication 则将各模块有机串联，形成完整的播放闭环。结合队列管理与命令系统，实现了从点歌到自动播放的完整体验。
 
-**更新**：本次更新显著增强了系统的错误处理和调试能力，新增的stderr行缓冲机制为问题诊断提供了强大支持。改进的PULSE_SERVER环境变量配置和PulseAudio检测逻辑大幅提升了Linux平台音频输出的稳定性和性能。通过环境变量与命令行参数的双重配置，确保了PulseAudio连接的一致性和可靠性。完善的Docker配置支持使得容器化部署更加简单可靠。这些改进使得系统在生产环境中更加健壮和易于维护。
+**更新**：本次更新显著增强了系统的错误处理和调试能力，新增的stderr行缓冲机制为问题诊断提供了强大支持。改进的PULSE_SERVER环境变量配置和PulseAudio检测逻辑大幅提升了Linux平台音频输出的稳定性和性能。**最重要的更新**是智能源类型检测功能，HTTP流自动应用网络重连参数优化播放稳定性，本地文件直接播放提升性能，实现了针对不同应用场景的最优配置。通过环境变量与命令行参数的双重配置，确保了PulseAudio连接的一致性和可靠性。完善的Docker配置支持使得容器化部署更加简单可靠。这些改进使得系统在生产环境中更加健壮和易于维护。
 
 未来可在Windows平台支持、错误重试与监控告警、PulseAudio连接池管理等方面进一步增强。
 
 ## 附录
 
 ### FFmpeg 参数配置要点
-- **重连策略**
-  - 流式重连与最大延迟，提升网络不稳定场景下的鲁棒性。
+- **智能重连策略**
+  - **HTTP流**：自动添加 `-reconnect 1`、`-reconnect_streamed 1`、`-reconnect_delay_max 5` 参数
+  - **本地文件**：跳过网络重连参数，直接播放
+  - 提升网络不稳定场景下的鲁棒性
 - **音频滤镜**
   - volume 滤镜用于初始音量设置；运行中通过平台特定方式微调。
 - **输出格式与目标**
