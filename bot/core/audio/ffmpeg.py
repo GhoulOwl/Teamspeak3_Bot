@@ -89,8 +89,10 @@ class FFmpegProcess:
             cmd.extend(["-f", "audiotoolbox"])
             cmd.append("default")
         else:
-            cmd.extend(["-f", "pulse", "-sink_name", f"{self._pulse_sink}.sink"])
-            cmd.append("/dev/null")
+            # Linux: output to PulseAudio
+            # Use the sink name directly (PulseAudio module will route it)
+            cmd.extend(["-f", "pulse"])
+            cmd.append(f"{self._pulse_sink}")
 
         logger.info("Starting FFmpeg: %s", " ".join(cmd[:6]) + "...")
 

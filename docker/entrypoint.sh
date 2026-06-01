@@ -24,36 +24,62 @@ echo "Xvfb started (PID: $XVFB_PID)"
 
 # ── Start PulseAudio (system mode for root) ──────
 echo "Starting PulseAudio..."
-# Create system mode config
-cat > /tmp/pulse-system.conf << 'EOF'
-load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-native
-load-module module-null-sink sink_name=ts3bot_sink sink_properties=device.description="TS3Bot_Virtual_Sink"
-set-default-sink ts3bot_sink
-set-default-source ts3bot_sink.monitor
-EOF
-
-pulseaudio --system --exit-idle-time=-1 --daemonize=no --conf-file=/tmp/pulse-system.conf > /data/logs/pulseaudio.log 2>&1 &
-PA_PID=$!
-sleep 3
+# Start in daemon mode with minimal config
+pulseaudio --system \
+  --exit-idle-time=-1 \
+  --daemonize \
+  --log-level=info \
+  --log-target=file:/data/logs/pulseaudio.log 2>/dev/null || true
+sleep 2
 
 # Set environment for pactl
 export PULSE_SERVER=unix:/tmp/pulse-native
+
+# Load required modules via pactl
+echo "Configuring PulseAudio modules..."
+pactl load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-native 2>/dev/null || true
+pactl load-module module-null-sink sink_name=ts3bot_sink sink_properties=device.description="TS3Bot_Virtual_Sink" 2>/dev/null || true
+pactl set-default-sink ts3bot_sink 2>/dev/null || true
+
+sleep 1
 
 # ── Verify PulseAudio is running ─────────────────
 echo "Verifying PulseAudio..."
 if pactl info > /dev/null 2>&1; then
     echo "PulseAudio is running"
+    pactl list short sinks
     pactl list short modules
 else
-    echo "WARNING: PulseAudio not responding, but continuing..."
-    cat /data/logs/pulseaudio.log
+    echo "WARNING: PulseAudio not responding, continuing..."
+    echo "PulseAudio log:"
+    cat /data/logs/pulseaudio.log 2>/dev/null || echo "No log file"
 fi
 
 # ── Start TS3 Client ─────────────────────────────
 echo "Starting TS3 Client..."
 cd /opt/ts3client
-# TS3 client binary (not script)
-TS3BIN=$(find . -name "ts3client_linux.amd64" -o -name "TeamSpeak3-Client-linux_amd64" -type f 2>/dev/null | head -1)
+
+# Find TS3 client binary (try multiple patterns)
+TS3BIN=""
+# Try exact binary name first
+for candidate in "ts3client_linux.amd64" "ts3client_runscript.sh" "TeamSpeak3-Client-linux_amd64"; do
+    if [ -f "$candidate" ]; then
+        TS3BIN="$candidate"
+        break
+    fi
+done
+
+# Fallback: find any executable with ts3/teamspeak in name
+if [ -z "$TS3BIN" ]; then
+    TS3BIN=$(find . -maxdepth 2 -type f -executable \( -iname "*ts3*" -o -iname "*teamspeak*" \) 2>/dev/null | head -1)
+fi
+
+# Last resort: list executables for debugging
+if [ -z "$TS3BIN" ]; then
+    echo "DEBUG: Listing executables in /opt/ts3client:"
+    find /opt/ts3client -maxdepth 3 -type f -executable | head -20
+fi
+
 if [ -n "$TS3BIN" ]; then
     echo "Found TS3 binary: $TS3BIN"
     chmod +x "$TS3BIN"
@@ -63,8 +89,8 @@ if [ -n "$TS3BIN" ]; then
     echo "TS3 Client started (PID: $TS3_PID)"
 else
     echo "WARNING: Could not find TS3 client binary"
-    echo "TS3 Client directory contents:"
-    find /opt/ts3client -maxdepth 2 -type f -name "ts3*" | head -20
+    echo "TS3 Client directory structure:"
+    ls -laR /opt/ts3client/ | head -50
     echo "Bot will start without TS3 Client (ServerQuery only mode)"
 fi
 
@@ -72,4 +98,5 @@ fi
 echo "Starting Python Bot..."
 cd /opt/bot
 export PULSE_SERVER=unix:/tmp/pulse-native
+export DISPLAY=:99
 exec python3 -m bot
