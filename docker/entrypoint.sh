@@ -72,22 +72,34 @@ cd /opt/ts3client
 # Find TS3 client binary (try multiple patterns)
 TS3BIN=""
 # Try exact binary name first
-for candidate in "ts3client_linux.amd64" "ts3client_runscript.sh" "TeamSpeak3-Client-linux_amd64"; do
+for candidate in "ts3client_linux_amd64" "ts3client_linux.amd64" "ts3client_runscript.sh" "TeamSpeak3-Client-linux_amd64"; do
     if [ -f "$candidate" ]; then
         TS3BIN="$candidate"
         break
     fi
 done
 
-# Fallback: find any executable with ts3/teamspeak in name
+# Fallback: find any file (not just executable) with ts3/teamspeak in name
 if [ -z "$TS3BIN" ]; then
-    TS3BIN=$(find . -maxdepth 2 -type f -executable \( -iname "*ts3*" -o -iname "*teamspeak*" \) 2>/dev/null | head -1)
+    TS3BIN=$(find . -maxdepth 3 -type f \( -iname "*ts3*" -o -iname "*teamspeak*" \) 2>/dev/null | head -1)
 fi
 
-# Last resort: list executables for debugging
+# Fallback: use 'file' to detect ELF binaries
 if [ -z "$TS3BIN" ]; then
-    echo "DEBUG: Listing executables in /opt/ts3client:"
-    find /opt/ts3client -maxdepth 3 -type f -executable | head -20
+    echo "Searching for ELF executables in /opt/ts3client..."
+    TS3BIN=$(find . -maxdepth 3 -type f -exec file {} \; 2>/dev/null \
+        | grep -i "ELF.*executable" \
+        | head -1 \
+        | cut -d: -f1)
+fi
+
+# Last resort: list ALL files for debugging
+if [ -z "$TS3BIN" ]; then
+    echo "DEBUG: All regular files in /opt/ts3client (maxdepth 1):"
+    find /opt/ts3client -maxdepth 1 -type f | head -30
+    echo ""
+    echo "DEBUG: All regular files in /opt/ts3client (maxdepth 3, non-.so):"
+    find /opt/ts3client -maxdepth 3 -type f ! -name "*.so" | head -30
 fi
 
 if [ -n "$TS3BIN" ]; then
@@ -99,8 +111,14 @@ if [ -n "$TS3BIN" ]; then
     echo "TS3 Client started (PID: $TS3_PID)"
 else
     echo "WARNING: Could not find TS3 client binary"
-    echo "TS3 Client directory structure:"
-    ls -laR /opt/ts3client/ | head -50
+    echo "All files in /opt/ts3client root:"
+    ls -la /opt/ts3client/
+    echo ""
+    echo "Subdirectories:"
+    find /opt/ts3client -maxdepth 1 -type d
+    echo ""
+    echo "Checking /opt/ts3client/bin/ if it exists:"
+    ls -la /opt/ts3client/bin/ 2>/dev/null || echo "  No bin/ directory"
     echo "Bot will start without TS3 Client (ServerQuery only mode)"
 fi
 

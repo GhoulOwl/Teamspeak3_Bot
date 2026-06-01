@@ -62,16 +62,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ── TeamSpeak 3 Client ───────────────────────────
 # Download and extract the TS3 Linux client
 # Note: Update the URL when a new version is released
+# The .run file is a makeself archive that contains:
+#   1. A setup script
+#   2. The actual application files (possibly in an inner tarball)
 ARG TS3_CLIENT_VERSION=3.6.2
 RUN wget -q "https://files.teamspeak-services.com/releases/client/${TS3_CLIENT_VERSION}/TeamSpeak3-Client-linux_amd64-${TS3_CLIENT_VERSION}.run" \
     -O /tmp/ts3client.run \
     && chmod +x /tmp/ts3client.run \
     && echo "y" | /tmp/ts3client.run --noexec --target /tmp/ts3client_extract \
+    && echo "=== Extracted files (top-level) ===" \
+    && ls -la /tmp/ts3client_extract/ \
+    && echo "=== Extracting inner archives if any ===" \
+    && (cd /tmp/ts3client_extract \
+        && for f in *.tar.xz *.tar.gz *.tar.bz2 *.tgz; do \
+            [ -f "$f" ] && echo "Extracting $f..." && tar xf "$f" && break; \
+        done; \
+        true) \
     && mkdir -p /opt/ts3client \
-    && cp -r /tmp/ts3client_extract/*/ /opt/ts3client/ \
-    && echo "=== TS3 Client directory structure ===" \
-    && find /opt/ts3client -maxdepth 1 -type f -executable \
-    && find /opt/ts3client -maxdepth 1 -type f -executable -exec chmod +x {} \; \
+    && echo "=== Copying extracted files ===" \
+    && if ls -d /tmp/ts3client_extract/*/ >/dev/null 2>&1; then \
+        cp -r /tmp/ts3client_extract/*/. /opt/ts3client/; \
+       else \
+        cp -r /tmp/ts3client_extract/. /opt/ts3client/; \
+       fi \
+    && echo "=== TS3 Client directory structure (root level) ===" \
+    && ls -la /opt/ts3client/ \
+    && echo "=== TS3 Client executables (maxdepth 3) ===" \
+    && find /opt/ts3client -maxdepth 3 -type f -executable | head -30 \
+    && find /opt/ts3client -maxdepth 3 -type f -executable -exec chmod +x {} \; \
+    && find /opt/ts3client -maxdepth 3 -type f ! -executable \( -name "ts3*" -o -name "TeamSpeak*" -o -name "teamspeak*" \) -exec chmod +x {} \; \
     && rm -rf /tmp/ts3client.run /tmp/ts3client_extract
 
 # ── Python dependencies ──────────────────────────
@@ -89,13 +108,14 @@ RUN useradd -m -s /bin/bash ts3bot \
     && chown -R ts3bot:ts3bot /data /home/ts3bot \
     && chown -R ts3bot:ts3bot /opt/bot
 
-# PulseAudio config - allow root to run PulseAudio in Docker
-# Create client.conf
+# PulseAudio configuration for Docker container
+# NOTE: Do NOT set "default-server" in client.conf — it prevents pulseaudio --start
+# from launching. Use PULSE_SERVER env variable instead (set in entrypoint.sh).
+# NOTE: "allow-root" is NOT a valid PulseAudio config option. The root warning
+# ("This program is not intended to be run as root") is harmless and can be ignored.
 RUN mkdir -p /etc/pulse \
-    && echo "default-server = unix:/tmp/pulse-native" >> /etc/pulse/client.conf \
-    && echo "autospawn = no" >> /etc/pulse/client.conf \
-    && echo "allow-root = yes" >> /etc/pulse/client.conf \
-    && echo "allow-module-loading = yes" >> /etc/pulse/daemon.conf \
+    && echo "autospawn = no" > /etc/pulse/client.conf \
+    && echo "allow-module-loading = yes" > /etc/pulse/daemon.conf \
     && echo "exit-idle-time = -1" >> /etc/pulse/daemon.conf \
     && echo "flat-volumes = no" >> /etc/pulse/daemon.conf
 
