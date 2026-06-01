@@ -51,14 +51,28 @@ pactl load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse
 pactl load-module module-null-sink sink_name=ts3bot_sink sink_properties=device.description="TS3Bot_Virtual_Sink" 2>/dev/null || true
 pactl set-default-sink ts3bot_sink 2>/dev/null || true
 
+# ── Audio routing: make null sink's monitor the default capture source ──
+# The TS3 Client captures from the default PulseAudio source.
+# By setting ts3bot_sink.monitor as default source, TS3 will capture
+# the bot's audio output.
+pactl set-default-source ts3bot_sink.monitor 2>/dev/null || true
+# Ensure a default source always exists (fallback)
+pactl load-module module-always-source 2>/dev/null || true
+
 sleep 1
 
 # ── Verify PulseAudio is running ─────────────────
 echo "Verifying PulseAudio..."
 if pactl info > /dev/null 2>&1; then
     echo "PulseAudio is running"
-    pactl list short sinks
-    pactl list short modules
+    echo "  Default sink: $(pactl info 2>/dev/null | grep 'Default Sink' || echo 'unknown')"
+    echo "  Default source: $(pactl info 2>/dev/null | grep 'Default Source' || echo 'unknown')"
+    echo "  Sinks:"
+    pactl list short sinks 2>/dev/null || echo "    (none)"
+    echo "  Sources:"
+    pactl list short sources 2>/dev/null || echo "    (none)"
+    echo "  Modules:"
+    pactl list short modules 2>/dev/null || echo "    (none)"
 else
     echo "WARNING: PulseAudio not responding, continuing..."
     echo "PulseAudio log:"

@@ -150,9 +150,8 @@ class FFmpegProcess:
             "-ac", str(self._channels),
             "-ar", str(self._sample_rate),
             "-nostdin",
+            "-hide_banner",
             "-y",
-            # Show warnings/errors in stderr for diagnosis
-            "-v", "warning",
         ])
 
         if self._is_macos:

@@ -18,15 +18,15 @@
 
 ## 更新摘要
 **变更内容**
-- **智能网络重连参数应用**：FFmpeg 集成现在根据源类型智能应用网络重连参数，HTTP流使用重连参数优化稳定性，本地文件直接播放无需重连
-- **HTTP流优化**：针对HTTP流自动添加 `-reconnect 1`、`-reconnect_streamed 1`、`-reconnect_delay_max 5` 参数，提升网络不稳定场景下的播放稳定性
-- **本地文件性能优化**：本地文件播放时跳过网络重连参数，减少不必要的开销，提升播放速度
-- **改进的FFmpeg错误处理和调试能力**：新增stderr行缓冲机制，用于故障诊断和问题排查
+- **增强FFmpeg进程管理**：新增进度解析能力，支持实时播放进度监控和提前退出检测
+- **新增进度解析能力**：实现time=HH:MM:SS.cc格式的进度解析，提供精确的播放时间跟踪
+- **提前退出检测**：基于预期时长和实际进度的比较，自动检测播放提前结束的情况
+- **实时监控功能**：改进的stderr监控机制，能够实时跟踪播放进度并定期记录日志
+- **智能源类型检测**：根据URL类型自动应用相应的FFmpeg参数配置，HTTP流启用网络重连，本地文件直接播放
+- **改进的错误处理机制**：新增stderr行缓冲机制，提供详细的故障诊断信息
 - **PULSE_SERVER环境变量支持**：在Docker入口脚本中设置PULSE_SERVER环境变量为`unix:/tmp/pulse-native`
 - **增强PulseAudio服务器检测逻辑**：改进了`_check_pulse_available()`方法，增加了Unix socket连接测试
-- **增强的PulseAudio服务器参数优化**：改进了Linux平台的PulseAudio服务器参数配置，使用更稳定的本地套接字连接
 - **音频输出格式优化**：优化了Linux平台的音频输出格式配置，确保与PulseAudio本地协议的兼容性
-- **容器化部署增强**：完善了Docker环境中的PulseAudio配置，包括客户端配置文件和本地协议模块
 
 ## 目录
 1. [简介](#简介)
@@ -43,11 +43,12 @@
 
 ## 简介
 本技术文档聚焦于FFmpeg集成模块，系统性阐述 FFmpegProcess 类的架构设计与实现原理，覆盖以下关键主题：
+- **增强的进程管理**：新增进度解析能力，支持实时播放进度监控和提前退出检测
 - **智能源类型检测**：根据URL类型自动应用相应的FFmpeg参数配置，HTTP流启用网络重连，本地文件直接播放
 - **跨平台FFmpeg集成**：支持Linux PulseAudio和macOS AudioToolbox的自动检测与配置
 - **PULSE_SERVER环境变量优化**：改进PulseAudio连接配置，使用稳定的本地套接字连接
-- **增强的错误处理机制**：新增stderr行缓冲机制，提供详细的故障诊断信息
 - **改进的PulseAudio检测逻辑**：增强的服务器可用性检测，支持Unix socket连接测试
+- **增强的错误处理机制**：新增stderr行缓冲机制，提供详细的故障诊断信息
 - FFmpeg 进程生命周期管理：启动、暂停/恢复、优雅停止与强制终止
 - 异步机制：基于 asyncio 的子进程与标准错误流监控
 - 回调系统：EOF 与错误事件的处理流程
@@ -109,7 +110,7 @@ CMD --> YT
 - [Dockerfile:94-96](file://Dockerfile#L94-L96)
 
 ## 核心组件
-- **FFmpegProcess**：封装单个 FFmpeg 子进程的创建、运行、监控与终止，负责将音频流解码并输出到平台特定的音频系统（Linux: PulseAudio, macOS: AudioToolbox）。**更新**：新增智能源类型检测，根据URL类型自动应用网络重连参数。
+- **FFmpegProcess**：封装单个 FFmpeg 子进程的创建、运行、监控与终止，负责将音频流解码并输出到平台特定的音频系统（Linux: PulseAudio, macOS: AudioToolbox）。**更新**：新增进度解析能力，支持实时播放进度监控和提前退出检测。
 - **AudioController**：高层控制器，协调 FFmpeg 生命周期、音量控制与状态机，并向应用层发出播放完成/错误事件。
 - **VolumeController**：双层音量控制（FFmpeg 增益 + 平台特定音量控制），提供平滑淡入淡出过渡。
 - **MusicQueue**：多用户点歌队列，支持跳过投票、重复模式与历史记录。
@@ -117,11 +118,11 @@ CMD --> YT
 - **YtDlpService**：yt-dlp集成服务，负责从各种平台提取音频URL和下载音频文件。
 
 **章节来源**
-- [ffmpeg.py:18-175](file://bot/core/audio/ffmpeg.py#L18-L175)
-- [controller.py:25-146](file://bot/core/audio/controller.py#L25-L146)
+- [ffmpeg.py:18-357](file://bot/core/audio/ffmpeg.py#L18-L357)
+- [controller.py:25-187](file://bot/core/audio/controller.py#L25-L187)
 - [volume.py:13-120](file://bot/core/audio/volume.py#L13-L120)
-- [ytdlp.py:44-200](file://bot/services/netease/ytdlp.py#L44-L200)
-- [app.py:27-348](file://bot/app.py#L27-L348)
+- [ytdlp.py:44-302](file://bot/services/netease/ytdlp.py#L44-L302)
+- [app.py:27-356](file://bot/app.py#L27-L356)
 
 ## 架构总览
 下图展示从命令触发到播放完成的端到端流程，包括参数构建、进程启动、监控与回调处理：
@@ -138,23 +139,23 @@ participant VC as "VolumeController"
 U->>CMD : "!play <URL/关键词>"
 CMD->>APP : "获取音频URL"
 APP->>MQ : "添加到队列"
-CMD->>AC : "play(url)"
-AC->>FF : "start(url, volume)"
+CMD->>AC : "play(url, duration)"
+AC->>FF : "start(url, volume, expected_duration)"
 Note over FF : "智能源类型检测"
 FF->>FF : "HTTP流 : 添加重连参数"
 FF->>FF : "本地文件 : 直接播放"
-Note over FF : "平台检测 : Darwin?"
-FF-->>AC : "stderr监控(日志/EOF/错误)"
+Note over FF : "进度解析 : time=HH : MM : SS.cc"
+FF-->>AC : "stderr监控(进度/EOF/错误)"
 AC-->>APP : "on_stopped/on_error"
 APP->>MQ : "next()"
-APP->>AC : "play(next_url)"
+APP->>AC : "play(next_url, next_duration)"
 ```
 
 **图表来源**
 - [music.py:20-93](file://bot/core/commands/handlers/music.py#L20-L93)
 - [app.py:199-253](file://bot/app.py#L199-L253)
-- [controller.py:70-88](file://bot/core/audio/controller.py#L70-L88)
-- [ffmpeg.py:54-93](file://bot/core/audio/ffmpeg.py#L54-L93)
+- [controller.py:76-118](file://bot/core/audio/controller.py#L76-L118)
+- [ffmpeg.py:98-188](file://bot/core/audio/ffmpeg.py#L98-L188)
 
 ## 详细组件分析
 
@@ -162,9 +163,11 @@ APP->>AC : "play(next_url)"
 - **职责与边界**
   - 创建并管理单个 FFmpeg 子进程，将其音频流解码后直接写入平台特定的音频系统。
   - 提供启动、停止、暂停/恢复、回调设置与进程监控能力。
+  - **更新**：新增进度解析能力，支持实时播放进度监控和提前退出检测。
 - **关键属性与配置**
   - 可配置项：ffmpeg 可执行路径、PulseAudio 接收器名称、采样率、声道数。
-  - 运行时状态：进程对象、监控任务、回调函数（EOF/错误）。
+  - 运行时状态：进程对象、监控任务、回调函数（EOF/错误）、进度跟踪。
+  - **更新**：新增进度解析相关属性：`_expected_duration`、`_start_time`、`_last_progress_time`、`_last_progress_log`。
   - **更新**：平台检测标志 `_is_macos` 用于区分Linux和macOS，使用 `platform.system() == "Darwin"` 进行统一检测。
   - **更新**：新增stderr行缓冲机制，通过`_stderr_lines`列表存储最近的stderr输出，最多保留50行用于故障诊断。
 - **启动流程**
@@ -175,13 +178,16 @@ APP->>AC : "play(next_url)"
   - **更新**：根据平台选择输出格式：Linux使用 `-f pulse`，macOS使用 `-f audiotoolbox`。
   - **更新**：Linux平台使用优化的PulseAudio服务器参数`-server unix:/tmp/pulse-native`，确保与PULSE_SERVER环境变量的一致性。
   - 使用 asyncio 子进程接口创建进程，并启动 stderr 监控任务。
-  - **更新**：启动前重置stderr缓冲区，确保新进程的错误信息不会污染之前的记录。
+  - **更新**：启动前重置进度跟踪状态，确保新进程的进度信息不会污染之前的记录。
 - **停止与终止**
   - 取消监控任务；尝试优雅终止（SIGTERM），超时则强制终止（SIGKILL）；捕获进程不存在异常。
 - **暂停/恢复**
   - 通过发送 SIGSTOP/SIGCONT 控制进程挂起/恢复。
 - **监控与回调**
-  - 读取 FFmpeg 标准错误流，解析退出码：0/-SIGTERM 表示正常结束（触发 EOF 回调），-25 表示被暂停（忽略），其他值视为错误（触发错误回调）。
+  - 读取 FFmpeg 标准错误流，解析进度信息：使用正则表达式 `time=HH:MM:SS.cc` 提取播放时间。
+  - **更新**：实时进度监控：每30秒记录一次播放进度日志。
+  - **更新**：提前退出检测：比较预期时长和实际进度，当实际进度小于预期时长的80%时标记为提前退出。
+  - 解析退出码：0/-SIGTERM 表示正常结束（触发 EOF 回调），-25 表示被暂停（忽略），其他值视为错误（触发错误回调）。
   - **更新**：新增详细的错误诊断功能，当FFmpeg异常退出时，会记录最后20行stderr输出，便于问题排查。
 - **错误处理与健壮性**
   - 对取消、超时、进程查找异常进行容错处理；日志记录关键事件与返回码。
@@ -201,22 +207,27 @@ class FFmpegProcess {
 - _on_error : callable
 - _stderr_lines : list[str]
 - _max_stderr_lines : int
+- _expected_duration : float
+- _start_time : float
+- _last_progress_time : float
+- _last_progress_log : float
 + is_running : bool
 + set_callbacks(on_eof, on_error)
-+ start(url, volume)
++ start(url, volume, expected_duration)
 + stop()
 + pause()
 + resume()
 - _monitor_stderr()
+- _parse_ffmpeg_time(line) float
 - _check_pulse_available() bool
 }
 ```
 
 **图表来源**
-- [ffmpeg.py:18-175](file://bot/core/audio/ffmpeg.py#L18-L175)
+- [ffmpeg.py:34-357](file://bot/core/audio/ffmpeg.py#L34-L357)
 
 **章节来源**
-- [ffmpeg.py:18-175](file://bot/core/audio/ffmpeg.py#L18-L175)
+- [ffmpeg.py:34-357](file://bot/core/audio/ffmpeg.py#L34-L357)
 
 ### AudioController 组件分析
 - **职责与边界**
@@ -245,7 +256,7 @@ class AudioController {
 + state : PlaybackState
 + volume : int
 + set_callbacks(on_stopped, on_error)
-+ play(url)
++ play(url, temp_file, duration)
 + stop()
 + pause()
 + resume()
@@ -257,10 +268,10 @@ class AudioController {
 ```
 
 **图表来源**
-- [controller.py:25-146](file://bot/core/audio/controller.py#L25-L146)
+- [controller.py:26-187](file://bot/core/audio/controller.py#L26-L187)
 
 **章节来源**
-- [controller.py:25-146](file://bot/core/audio/controller.py#L25-L146)
+- [controller.py:26-187](file://bot/core/audio/controller.py#L26-L187)
 
 ### VolumeController 组件分析
 - **设计理念**
@@ -316,16 +327,16 @@ participant APP as "BotApplication"
 participant AC as "AudioController"
 participant FF as "FFmpegProcess"
 CMD->>MQ : "添加条目"
-CMD->>AC : "play(url)"
-AC->>FF : "start(url, volume)"
+CMD->>AC : "play(url, duration)"
+AC->>FF : "start(url, volume, expected_duration)"
 Note over FF : "智能源类型检测"
 FF->>FF : "HTTP流 : 添加重连参数"
 FF->>FF : "本地文件 : 直接播放"
-Note over FF : "平台检测 : Darwin?"
+Note over FF : "进度解析 : time=HH : MM : SS.cc"
 FF-->>AC : "EOF/错误回调"
 AC-->>APP : "on_stopped/on_error"
 APP->>MQ : "next()"
-APP->>AC : "play(next_url)"
+APP->>AC : "play(next_url, next_duration)"
 ```
 
 **图表来源**
@@ -334,16 +345,31 @@ APP->>AC : "play(next_url)"
 - [ytdlp.py:66-100](file://bot/services/netease/ytdlp.py#L66-L100)
 
 **章节来源**
-- [music.py:17-243](file://bot/core/commands/handlers/music.py#L17-L243)
+- [music.py:17-260](file://bot/core/commands/handlers/music.py#L17-L260)
 - [app.py:199-253](file://bot/app.py#L199-L253)
-- [ytdlp.py:44-200](file://bot/services/netease/ytdlp.py#L44-L200)
+- [ytdlp.py:44-302](file://bot/services/netease/ytdlp.py#L44-L302)
 
 ## 跨平台支持详解
 
-### 智能源类型检测与参数优化
-**更新**：FFmpeg集成模块实现了智能的源类型检测，通过以下机制实现：
+### 增强的进程管理与监控
+**更新**：FFmpeg集成模块实现了增强的进程管理能力，通过以下机制实现：
 
-- **源类型检测**
+- **进度解析能力**
+  - 使用正则表达式 `_TIME_RE = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")` 解析FFmpeg进度信息
+  - 支持time=HH:MM:SS.cc格式的精确时间解析
+  - 将解析结果转换为秒数，用于进度跟踪和提前退出检测
+
+- **实时监控功能**
+  - 在stderr监控任务中实时解析进度行，更新`_last_progress_time`属性
+  - 每30秒记录一次播放进度日志，便于监控播放状态
+  - 进度解析不计入stderr缓冲区，避免过度占用内存
+
+- **提前退出检测**
+  - 基于预期时长和实际进度的比较，检测播放提前结束
+  - 当实际进度小于预期时长的80%时，标记为提前退出并记录详细信息
+  - 仅对超过10秒的曲目进行提前退出检测，避免误判短音频
+
+- **智能源类型检测**
   - 使用 `url.startswith(("http://", "https://"))` 检测HTTP流
   - 本地文件路径自动识别，跳过网络重连参数
   - 为不同源类型提供最优的FFmpeg参数配置
@@ -430,8 +456,9 @@ FFmpeg集成模块实现了智能的跨平台支持，通过以下机制实现�
   - **更新**：完整的PulseAudio容器化配置
 
 **章节来源**
-- [ffmpeg.py:39-91](file://bot/core/audio/ffmpeg.py#L39-L91)
-- [controller.py:49](file://bot/core/audio/controller.py#L49)
+- [ffmpeg.py:21-32](file://bot/core/audio/ffmpeg.py#L21-L32)
+- [ffmpeg.py:98-188](file://bot/core/audio/ffmpeg.py#L98-L188)
+- [controller.py:76-118](file://bot/core/audio/controller.py#L76-L118)
 - [volume.py:26](file://bot/core/audio/volume.py#L26)
 - [config.py:48-55](file://bot/config.py#L48-L55)
 - [config.yaml:14-21](file://config/config.yaml#L14-L21)
@@ -485,6 +512,7 @@ YT --> FF
   - 使用 asyncio 子进程与异步标准错误读取，避免阻塞事件循环。
   - 监控任务独立运行，确保在进程退出时能及时处理 EOF/错误回调。
   - **更新**：stderr行缓冲机制使用高效的列表操作，避免内存泄漏。
+  - **更新**：进度解析使用正则表达式，性能开销最小化。
 - **音量控制**
   - 初始音量通过 FFmpeg volume 滤镜设置，运行中使用平台特定方式微调，步长与间隔可调，平衡响应速度与平滑度。
   - **更新**：macOS平台仅使用FFmpeg音量控制，减少系统调用开销。
@@ -496,10 +524,15 @@ YT --> FF
   - **更新**：PULSE_SERVER环境变量优化了PulseAudio连接性能，减少连接建立时间。
   - **更新**：增强的PulseAudio检测逻辑，Unix socket连接测试提高服务器可用性检测效率。
   - **更新**：智能源类型检测，HTTP流启用重连参数，本地文件跳过重连参数，提升整体性能。
+  - **更新**：进度解析和提前退出检测功能，避免不必要的CPU开销。
 - **网络重连优化**
   - **更新**：HTTP流自动应用重连参数，提升网络不稳定场景下的播放稳定性。
   - **更新**：本地文件直接播放，跳过网络重连参数，减少启动时间和系统开销。
   - **更新**：重连延迟设置为5秒，平衡重连效果与系统负载。
+- **内存管理**
+  - **更新**：stderr缓冲区大小限制为50行，避免内存泄漏。
+  - **更新**：进度解析不计入缓冲区，减少内存占用。
+  - **更新**：进度日志按30秒间隔记录，避免频繁的日志写入。
 
 ## 故障排除指南
 - **FFmpeg 无法启动**
@@ -535,13 +568,21 @@ YT --> FF
   - **更新**：确认文件路径有效且可访问。
   - **更新**：检查文件大小和格式，确认适合直接播放。
   - **更新**：验证本地文件播放时未意外应用网络重连参数。
+- **播放提前结束**
+  - **更新**：检查提前退出检测逻辑，确认预期时长设置正确。
+  - **更新**：查看进度日志，确认播放进度是否正常增长。
+  - **更新**：检查网络连接和音频设备状态。
+- **进度解析问题**
+  - **更新**：确认FFmpeg版本支持time=格式的进度输出。
+  - **更新**：检查stderr日志中是否有进度解析相关的错误信息。
+  - **更新**：验证正则表达式是否正确匹配进度格式。
 - **错误诊断和日志分析**
   - **更新**：查看stderr缓冲区中的详细错误信息，包含完整的错误上下文。
   - **更新**：利用增强的错误处理机制，快速定位问题根因。
   - **更新**：检查PulseAudio日志文件，分析连接问题。
 
 **章节来源**
-- [ffmpeg.py:94-115](file://bot/core/audio/ffmpeg.py#L94-L115)
+- [ffmpeg.py:223-328](file://bot/core/audio/ffmpeg.py#L223-L328)
 - [volume.py:77-109](file://bot/core/audio/volume.py#L77-L109)
 - [docker-compose.yml:9-26](file://docker-compose.yml#L9-L26)
 - [entrypoint.sh:45-46](file://docker/entrypoint.sh#L45-L46)
@@ -549,7 +590,7 @@ YT --> FF
 ## 结论
 本集成方案通过清晰的分层设计与异步化实现，提供了稳定可靠的跨平台音频播放能力。FFmpegProcess 负责底层进程与流处理，支持Linux PulseAudio和macOS AudioToolbox的自动检测与配置；AudioController 提供高层状态与事件管理；VolumeController 实现平台特定的平滑音量控制；BotApplication 则将各模块有机串联，形成完整的播放闭环。结合队列管理与命令系统，实现了从点歌到自动播放的完整体验。
 
-**更新**：本次更新显著增强了系统的错误处理和调试能力，新增的stderr行缓冲机制为问题诊断提供了强大支持。改进的PULSE_SERVER环境变量配置和PulseAudio检测逻辑大幅提升了Linux平台音频输出的稳定性和性能。**最重要的更新**是智能源类型检测功能，HTTP流自动应用网络重连参数优化播放稳定性，本地文件直接播放提升性能，实现了针对不同应用场景的最优配置。通过环境变量与命令行参数的双重配置，确保了PulseAudio连接的一致性和可靠性。完善的Docker配置支持使得容器化部署更加简单可靠。这些改进使得系统在生产环境中更加健壮和易于维护。
+**更新**：本次更新显著增强了系统的监控和诊断能力，新增的进度解析功能提供了精确的播放进度跟踪，提前退出检测机制能够及时发现播放异常。改进的stderr行缓冲机制为问题诊断提供了强大支持。改进的PULSE_SERVER环境变量配置和PulseAudio检测逻辑大幅提升了Linux平台音频输出的稳定性和性能。智能源类型检测功能，HTTP流自动应用网络重连参数优化播放稳定性，本地文件直接播放提升性能，实现了针对不同应用场景的最优配置。通过环境变量与命令行参数的双重配置，确保了PulseAudio连接的一致性和可靠性。完善的Docker配置支持使得容器化部署更加简单可靠。这些改进使得系统在生产环境中更加健壮和易于维护。
 
 未来可在Windows平台支持、错误重试与监控告警、PulseAudio连接池管理等方面进一步增强。
 
@@ -572,11 +613,14 @@ YT --> FF
 - **PULSE_SERVER优化**
   - **更新**：Linux平台使用`-server unix:/tmp/pulse-native`参数，与PULSE_SERVER环境变量保持一致。
   - **更新**：增强的PulseAudio检测逻辑，支持Unix socket连接测试。
+- **进度解析配置**
+  - **更新**：启用FFmpeg进度输出，支持time=格式的时间解析。
+  - **更新**：实时进度监控，每30秒记录一次播放进度。
 
 **章节来源**
-- [ffmpeg.py:66-93](file://bot/core/audio/ffmpeg.py#L66-L93)
+- [ffmpeg.py:134-170](file://bot/core/audio/ffmpeg.py#L134-L170)
 - [config.py:48-55](file://bot/config.py#L48-L55)
-- [ffmpeg.py:92-96](file://bot/core/audio/ffmpeg.py#L92-L96)
+- [ffmpeg.py:21-32](file://bot/core/audio/ffmpeg.py#L21-L32)
 
 ### 音频格式转换与流媒体处理
 - **解复用/解码**
@@ -590,6 +634,9 @@ YT --> FF
   - **更新**：使用PULSE_SERVER环境变量确保连接稳定性。
   - **更新**：优化服务器参数配置，提高音频输出性能。
   - **更新**：增强的检测逻辑，支持Unix socket连接测试。
+- **进度监控与提前退出检测**
+  - **更新**：实时进度解析，支持time=格式的时间跟踪。
+  - **更新**：基于预期时长的提前退出检测机制。
 
 **章节来源**
 - [ffmpeg.py:19-21](file://bot/core/audio/ffmpeg.py#L19-L21)
@@ -598,15 +645,16 @@ YT --> FF
 
 ### 进程监控、资源清理与异常恢复
 - **监控**
-  - 异步读取 stderr，解析退出码并触发回调。
+  - 异步读取 stderr，解析进度信息并触发回调。
   - **更新**：stderr行缓冲机制，提供详细的错误诊断信息。
+  - **更新**：实时进度监控，支持播放状态跟踪。
 - **清理**
   - 取消监控任务、优雅终止进程、超时强制终止、清理状态。
 - **恢复**
   - 应用层在 EOF/错误时自动播放下一首，保障连续性。
 
 **章节来源**
-- [ffmpeg.py:127-175](file://bot/core/audio/ffmpeg.py#L127-L175)
+- [ffmpeg.py:223-357](file://bot/core/audio/ffmpeg.py#L223-L357)
 - [app.py:199-253](file://bot/app.py#L199-L253)
 
 ### 配置与部署参考
@@ -624,6 +672,9 @@ YT --> FF
 - **增强的错误处理**
   - **更新**：stderr行缓冲机制，提供详细的故障诊断信息。
   - **更新**：改进的PulseAudio检测逻辑，支持Unix socket连接测试。
+- **进度监控配置**
+  - **更新**：FFmpeg进度输出配置，支持time=格式解析。
+  - **更新**：提前退出检测阈值配置，避免误判短音频。
 
 **章节来源**
 - [config.py:125-160](file://bot/config.py#L125-L160)

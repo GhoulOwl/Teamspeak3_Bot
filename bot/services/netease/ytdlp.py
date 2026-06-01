@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from typing import Any
@@ -146,11 +148,29 @@ class YtDlpService:
             )
             return None
 
+        # Validate actual duration with ffprobe (metadata duration may be wrong)
+        actual_duration = self._ffprobe_duration(filepath)
+        expected_duration = info.get("duration", 0) or 0
         logger.info(
-            "Downloaded file validated: %s (%.2f MB)",
+            "Downloaded file: %s (%.2f MB, ffprobe: %.1fs, metadata: %.0fs)",
             filepath,
             file_size / (1024 * 1024),
+            actual_duration,
+            expected_duration,
         )
+
+        if actual_duration > 0 and expected_duration > 10:
+            if actual_duration < expected_duration * 0.5:
+                logger.error(
+                    "Downloaded file duration %.1fs much less than expected %.0fs "
+                    "— file is truncated or a low-quality preview",
+                    actual_duration,
+                    expected_duration,
+                )
+                return None
+
+        # Use actual duration if available, fallback to metadata
+        final_duration = actual_duration if actual_duration > 0 else expected_duration
 
         extractor = info.get("extractor", "")
         source_map = {
@@ -164,17 +184,41 @@ class YtDlpService:
         logger.info(
             "Downloaded audio: %s (%.0fs) -> %s",
             info.get("title", "?"),
-            info.get("duration", 0) or 0,
+            final_duration,
             filepath,
         )
 
         return DownloadedAudio(
             path=filepath,
             title=info.get("title", "Unknown"),
-            duration=info.get("duration", 0) or 0,
+            duration=final_duration,
             source=source,
             original_url=url,
         )
+
+    @staticmethod
+    def _ffprobe_duration(filepath: str) -> float:
+        """Get actual file duration using ffprobe.  Returns 0 on failure."""
+        ffprobe = shutil.which("ffprobe")
+        if not ffprobe:
+            return 0.0
+        try:
+            result = subprocess.run(
+                [
+                    ffprobe,
+                    "-v", "quiet",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    filepath,
+                ],
+                capture_output=True,
+                timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return float(result.stdout.strip())
+        except (subprocess.TimeoutExpired, ValueError, FileNotFoundError):
+            pass
+        return 0.0
 
     def _extract_sync(self, url: str) -> AudioInfo | None:
         """Synchronous extraction (runs in thread pool)."""
