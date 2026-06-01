@@ -211,7 +211,9 @@ class BotApplication:
                     downloaded = await self.netease.download_url(original_url)
                     if downloaded:
                         await self.audio.play(
-                            downloaded.path, temp_file=downloaded.path
+                            downloaded.path,
+                            temp_file=downloaded.path,
+                            duration=downloaded.duration,
                         )
                         await self.sq.reply_to_channel(
                             f"正在播放: {entry.song.display_name} - 点歌: {entry.requester_name}"
@@ -238,7 +240,11 @@ class BotApplication:
             return
 
         try:
-            await self.audio.play(downloaded.path, temp_file=downloaded.path)
+            await self.audio.play(
+                downloaded.path,
+                temp_file=downloaded.path,
+                duration=downloaded.duration,
+            )
             await self.sq.reply_to_channel(
                 f"正在播放: {entry.song.display_name} - 点歌: {entry.requester_name}"
             )

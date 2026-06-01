@@ -136,6 +136,22 @@ class YtDlpService:
                 logger.error("Downloaded file not found: %s", filepath)
                 return None
 
+        # Validate file size (at least 10 KB — smaller files are likely errors)
+        file_size = os.path.getsize(filepath)
+        if file_size < 10 * 1024:
+            logger.error(
+                "Downloaded file too small: %s (%d bytes), likely corrupted",
+                filepath,
+                file_size,
+            )
+            return None
+
+        logger.info(
+            "Downloaded file validated: %s (%.2f MB)",
+            filepath,
+            file_size / (1024 * 1024),
+        )
+
         extractor = info.get("extractor", "")
         source_map = {
             "NetEaseMusic": "网易云音乐",

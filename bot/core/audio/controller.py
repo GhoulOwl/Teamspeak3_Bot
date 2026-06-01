@@ -73,11 +73,22 @@ class AudioController:
         self._on_playback_stopped = on_stopped
         self._on_playback_error = on_error
 
-    async def play(self, source: str, *, temp_file: str | None = None) -> None:
+    async def play(
+        self,
+        source: str,
+        *,
+        temp_file: str | None = None,
+        duration: float = 0,
+    ) -> None:
         """Start playing a source (URL or local file path).
 
         Stops any current playback first. If *temp_file* is given it will
         be deleted once playback finishes or is stopped.
+
+        Args:
+            source: Audio source URL or local file path
+            temp_file: Temp file to clean up after playback
+            duration: Expected duration in seconds (for premature-exit detection)
         """
         if self._state != PlaybackState.IDLE:
             await self.stop()
@@ -92,9 +103,13 @@ class AudioController:
             on_error=self._handle_error,
         )
 
-        await self._ffmpeg.start(source, volume=self._volume.volume)
+        await self._ffmpeg.start(
+            source,
+            volume=self._volume.volume,
+            expected_duration=duration,
+        )
         self._state = PlaybackState.PLAYING
-        logger.info("Playback started: %s", source[:80])
+        logger.info("Playback started: %s (duration: %.0fs)", source[:80], duration)
 
         # Refresh sink input for volume control (Linux only, give FFmpeg a moment to start)
         if not self._is_macos:

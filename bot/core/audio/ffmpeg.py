@@ -6,15 +6,29 @@ import asyncio
 import logging
 import os
 import platform
+import re
 import shutil
 import signal
 import subprocess
+import time
 from typing import Any, Callable, Coroutine
 
 logger = logging.getLogger(__name__)
 
 # Callback type for when FFmpeg finishes or errors
 FFmpegCallback = Callable[[], Coroutine[Any, Any, None]]
+
+# Pattern to parse FFmpeg progress: time=HH:MM:SS.cc
+_TIME_RE = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
+
+
+def _parse_ffmpeg_time(line: str) -> float | None:
+    """Parse FFmpeg progress time from a stderr line.  Returns seconds or None."""
+    m = _TIME_RE.search(line)
+    if not m:
+        return None
+    h, mn, s = m.groups()
+    return int(h) * 3600 + int(mn) * 60 + float(s)
 
 
 class FFmpegProcess:
@@ -54,6 +68,12 @@ class FFmpegProcess:
         self._stderr_lines: list[str] = []
         self._max_stderr_lines = 50
 
+        # Progress / duration tracking
+        self._expected_duration: float = 0
+        self._start_time: float = 0
+        self._last_progress_time: float = 0.0
+        self._last_progress_log: float = 0.0
+
         # Warn early when PulseAudio looks unavailable on Linux
         if not self._is_macos and not self._check_pulse_available():
             logger.warning(
@@ -75,7 +95,12 @@ class FFmpegProcess:
         self._on_eof = on_eof
         self._on_error = on_error
 
-    async def start(self, url: str, volume: int = 70) -> None:
+    async def start(
+        self,
+        url: str,
+        volume: int = 70,
+        expected_duration: float = 0,
+    ) -> None:
         """Start FFmpeg to play a URL/file.
 
         On Linux: outputs to PulseAudio sink
@@ -84,9 +109,22 @@ class FFmpegProcess:
         Args:
             url: Audio source URL or file path
             volume: Volume level 0-100 (converted to FFmpeg gain)
+            expected_duration: Expected duration in seconds (for premature-exit detection)
         """
         if self.is_running:
             await self.stop()
+
+        # Log local file info before starting
+        if not url.startswith(("http://", "https://")):
+            if os.path.isfile(url):
+                file_size = os.path.getsize(url)
+                logger.info(
+                    "Input file: %s (size: %.2f MB)",
+                    url,
+                    file_size / (1024 * 1024),
+                )
+            else:
+                logger.warning("Input file does not exist: %s", url)
 
         gain = volume / 100.0
         is_http = url.startswith(("http://", "https://"))
@@ -100,6 +138,11 @@ class FFmpegProcess:
                 "-reconnect_streamed", "1",
                 "-reconnect_delay_max", "5",
             ])
+        else:
+            # For local files, read at native frame rate (real-time).
+            # Without this FFmpeg pushes audio as fast as possible, which can
+            # overwhelm PulseAudio buffers and cause early stream termination.
+            cmd.append("-re")
 
         cmd.extend([
             "-i", url,
@@ -108,6 +151,8 @@ class FFmpegProcess:
             "-ar", str(self._sample_rate),
             "-nostdin",
             "-y",
+            # Show warnings/errors in stderr for diagnosis
+            "-v", "warning",
         ])
 
         if self._is_macos:
@@ -123,10 +168,14 @@ class FFmpegProcess:
                 cmd.extend(["-server", pulse_server])
             cmd.append(self._pulse_sink)
 
-        logger.info("Starting FFmpeg: %s ...", " ".join(cmd[:6]))
+        logger.info("Starting FFmpeg: %s", " ".join(cmd))
 
-        # Reset stderr buffer for the new process
+        # Reset state for the new process
         self._stderr_lines = []
+        self._expected_duration = expected_duration
+        self._start_time = time.monotonic()
+        self._last_progress_time = 0.0
+        self._last_progress_log = 0.0
 
         self._process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -183,39 +232,97 @@ class FFmpegProcess:
                     break
 
                 text = line.decode("utf-8", errors="replace").strip()
-                if text:
-                    logger.debug("FFmpeg: %s", text)
-                    # Buffer last N lines for error diagnosis
-                    self._stderr_lines.append(text)
-                    if len(self._stderr_lines) > self._max_stderr_lines:
-                        self._stderr_lines.pop(0)
+                if not text:
+                    continue
+
+                # Parse FFmpeg progress lines (contain time=, size=, etc.)
+                progress = _parse_ffmpeg_time(text)
+                if progress is not None:
+                    self._last_progress_time = progress
+                    # Log progress every ~30 seconds of audio
+                    if progress - self._last_progress_log >= 30:
+                        logger.info(
+                            "FFmpeg progress: %.1fs / %.0fs",
+                            progress,
+                            self._expected_duration or 0,
+                        )
+                        self._last_progress_log = progress
+                    # Don't buffer progress lines — they flood the buffer
+                    continue
+
+                # Non-progress line: buffer and log at debug
+                logger.debug("FFmpeg: %s", text)
+                self._stderr_lines.append(text)
+                if len(self._stderr_lines) > self._max_stderr_lines:
+                    self._stderr_lines.pop(0)
 
         except asyncio.CancelledError:
             return
 
-        # Process ended — check exit code
+        # ── Process ended — analyse exit ──────────────────────────────
         if self._process:
             await self._process.wait()
             returncode = self._process.returncode
+            elapsed = time.monotonic() - self._start_time
 
             if returncode == 0 or returncode == -signal.SIGTERM:
-                # Normal end of stream
-                logger.info("FFmpeg finished (exit code %d)", returncode)
+                # Check for premature exit
+                premature = (
+                    self._expected_duration > 10
+                    and self._last_progress_time < self._expected_duration * 0.8
+                )
+
+                if premature:
+                    logger.warning(
+                        "FFmpeg finished EARLY (exit code %d): "
+                        "progress %.1fs / expected %.0fs, wall %.1fs. "
+                        "Last stderr:\n  %s",
+                        returncode,
+                        self._last_progress_time,
+                        self._expected_duration,
+                        elapsed,
+                        "\n  ".join(self._stderr_lines[-20:])
+                        if self._stderr_lines
+                        else "(no stderr captured)",
+                    )
+                else:
+                    logger.info(
+                        "FFmpeg finished (exit code %d, progress %.1fs, wall %.1fs)",
+                        returncode,
+                        self._last_progress_time,
+                        elapsed,
+                    )
+                    # Still log stderr if any warnings were captured
+                    if self._stderr_lines:
+                        logger.info(
+                            "FFmpeg stderr:\n  %s",
+                            "\n  ".join(self._stderr_lines[-20:]),
+                        )
+
                 if self._on_eof:
                     await self._on_eof()
+
             elif returncode == -25:
                 # SIGSTOP (pause), not an error
                 pass
             else:
-                # Log captured stderr so the user can diagnose the problem
+                # Error exit — always show stderr
                 if self._stderr_lines:
                     logger.warning(
-                        "FFmpeg exited with code %d. Last stderr lines:\n  %s",
+                        "FFmpeg exited with code %d (progress %.1fs, wall %.1fs). "
+                        "Last stderr:\n  %s",
                         returncode,
+                        self._last_progress_time,
+                        elapsed,
                         "\n  ".join(self._stderr_lines[-20:]),
                     )
                 else:
-                    logger.warning("FFmpeg exited with code %d", returncode)
+                    logger.warning(
+                        "FFmpeg exited with code %d (progress %.1fs, wall %.1fs)",
+                        returncode,
+                        self._last_progress_time,
+                        elapsed,
+                    )
                 if self._on_error:
                     await self._on_error()
 

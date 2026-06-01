@@ -53,10 +53,19 @@ def register(registry: CommandRegistry, app: BotApplication) -> None:
 
             if app.audio.state.value == "idle":
                 app.music_queue.next()
-                await app.audio.play(info.url)
-                await ctx.reply_channel(
-                    f"正在播放: {info.title} ({info.source}) - 点歌: {ctx.invoker_name}"
-                )
+                # Download audio to local file (CDN URLs expire mid-stream)
+                downloaded = await app.netease.download_url(query)
+                if downloaded:
+                    await app.audio.play(
+                        downloaded.path,
+                        temp_file=downloaded.path,
+                        duration=downloaded.duration,
+                    )
+                    await ctx.reply_channel(
+                        f"正在播放: {info.title} ({info.source}) - 点歌: {ctx.invoker_name}"
+                    )
+                else:
+                    await ctx.reply_same("音频下载失败")
             else:
                 pos = app.music_queue.length
                 await ctx.reply_same(f"已加入队列 (#{pos}): {info.title} ({info.source})")
@@ -215,7 +224,9 @@ async def _play_next(app: BotApplication) -> None:
                 downloaded = await app.netease.download_url(original_url)
                 if downloaded:
                     await app.audio.play(
-                        downloaded.path, temp_file=downloaded.path
+                        downloaded.path,
+                        temp_file=downloaded.path,
+                        duration=downloaded.duration,
                     )
                     return
             except Exception:
@@ -241,4 +252,8 @@ async def _play_next(app: BotApplication) -> None:
         await _play_next(app)
         return
 
-    await app.audio.play(downloaded.path, temp_file=downloaded.path)
+    await app.audio.play(
+        downloaded.path,
+        temp_file=downloaded.path,
+        duration=downloaded.duration,
+    )
