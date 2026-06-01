@@ -52,6 +52,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     # TS3 client runtime dependencies
     libevent-2.1-7 \
+    libxdamage1 \
+    libpci3 \
+    libxslt1.1 \
+    libatomic1 \
     # Utilities
     wget \
     bzip2 \
