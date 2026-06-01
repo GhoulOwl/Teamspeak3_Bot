@@ -6,6 +6,8 @@ echo "=== TS3 Bot Container Starting ==="
 # ── Create runtime directories ───────────────────
 mkdir -p /data/cache /data/logs
 mkdir -p /home/ts3bot/.ts3client
+mkdir -p /tmp/pulse-runtime
+export PULSE_RUNTIME_PATH=/tmp/pulse-runtime
 
 # ── Initialize TS3 client identity (first run) ──
 if [ ! -f /home/ts3bot/.ts3client/settings.db ]; then
@@ -22,34 +24,52 @@ echo "Xvfb started (PID: $XVFB_PID)"
 
 # ── Start PulseAudio (system mode for root) ──────
 echo "Starting PulseAudio..."
-pulseaudio --system --exit-idle-time=-1 --daemonize=no > /data/logs/pulseaudio.log 2>&1 &
+# Create system mode config
+cat > /tmp/pulse-system.conf << 'EOF'
+load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-native
+load-module module-null-sink sink_name=ts3bot_sink sink_properties=device.description="TS3Bot_Virtual_Sink"
+set-default-sink ts3bot_sink
+set-default-source ts3bot_sink.monitor
+EOF
+
+pulseaudio --system --exit-idle-time=-1 --daemonize=no --conf-file=/tmp/pulse-system.conf > /data/logs/pulseaudio.log 2>&1 &
 PA_PID=$!
 sleep 3
 
-# ── Configure PulseAudio null sink ───────────────
-echo "Configuring PulseAudio null sink..."
-pactl load-module module-null-sink sink_name=ts3bot_sink sink_properties=device.description="TS3Bot_Virtual_Sink" || echo "Failed to load null sink (will retry)"
-pactl set-default-sink ts3bot_sink || echo "Failed to set default sink"
-pactl set-default-source ts3bot_sink.monitor || echo "Failed to set default source"
-echo "PulseAudio configured"
+# Set environment for pactl
+export PULSE_SERVER=unix:/tmp/pulse-native
+
+# ── Verify PulseAudio is running ─────────────────
+echo "Verifying PulseAudio..."
+if pactl info > /dev/null 2>&1; then
+    echo "PulseAudio is running"
+    pactl list short modules
+else
+    echo "WARNING: PulseAudio not responding, but continuing..."
+    cat /data/logs/pulseaudio.log
+fi
 
 # ── Start TS3 Client ─────────────────────────────
 echo "Starting TS3 Client..."
 cd /opt/ts3client
-TS3SCRIPT=$(find . -name "ts3client_runscript.sh" 2>/dev/null | head -1)
-if [ -n "$TS3SCRIPT" ]; then
-    echo "Found TS3 script: $TS3SCRIPT"
-    chmod +x "$TS3SCRIPT"
-    ./"$TS3SCRIPT" &
+# TS3 client binary (not script)
+TS3BIN=$(find . -name "ts3client_linux.amd64" -o -name "TeamSpeak3-Client-linux_amd64" -type f 2>/dev/null | head -1)
+if [ -n "$TS3BIN" ]; then
+    echo "Found TS3 binary: $TS3BIN"
+    chmod +x "$TS3BIN"
+    ./"$TS3BIN" &
     TS3_PID=$!
     sleep 10
     echo "TS3 Client started (PID: $TS3_PID)"
 else
-    echo "ERROR: Could not find ts3client_runscript.sh"
-    ls -la /opt/ts3client/
+    echo "WARNING: Could not find TS3 client binary"
+    echo "TS3 Client directory contents:"
+    find /opt/ts3client -maxdepth 2 -type f -name "ts3*" | head -20
+    echo "Bot will start without TS3 Client (ServerQuery only mode)"
 fi
 
 # ── Start Python Bot ─────────────────────────────
 echo "Starting Python Bot..."
 cd /opt/bot
+export PULSE_SERVER=unix:/tmp/pulse-native
 exec python3 -m bot

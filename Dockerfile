@@ -68,7 +68,9 @@ RUN wget -q "https://files.teamspeak-services.com/releases/client/${TS3_CLIENT_V
     && echo "y" | /tmp/ts3client.run --noexec --target /tmp/ts3client_extract \
     && mkdir -p /opt/ts3client \
     && cp -r /tmp/ts3client_extract/*/ /opt/ts3client/ \
-    && find /opt/ts3client -name "*.sh" -exec chmod +x {} \; \
+    && echo "=== TS3 Client directory structure ===" \
+    && find /opt/ts3client -maxdepth 1 -type f -executable \
+    && find /opt/ts3client -maxdepth 1 -type f -executable -exec chmod +x {} \; \
     && rm -rf /tmp/ts3client.run /tmp/ts3client_extract
 
 # ── Python dependencies ──────────────────────────
