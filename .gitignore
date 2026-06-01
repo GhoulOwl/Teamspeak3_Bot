@@ -16,3 +16,5 @@ data/
 .ruff_cache/
 .mypy_cache/
 .DS_Store
+# TeamSpeak 3 client installer (large binary, download manually)
+*.run

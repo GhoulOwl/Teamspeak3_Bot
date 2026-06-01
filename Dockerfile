@@ -60,38 +60,41 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── TeamSpeak 3 Client ───────────────────────────
-# Download and extract the TS3 Linux client
-# Note: Update the URL when a new version is released
-# The .run file is a makeself archive that contains:
-#   1. A setup script
-#   2. The actual application files (possibly in an inner tarball)
+# The TS3 Linux client .run file must be manually downloaded and placed
+# in the project root directory before building:
+#
+#   wget https://files.teamspeak-services.com/releases/client/3.6.2/TeamSpeak3-Client-linux_amd64-3.6.2.run
+#
+# The .run file is a makeself self-extracting archive containing:
+#   1. A makeself wrapper (handles --noexec, --target, --nox11 etc.)
+#   2. An embedded setup script (the actual installer)
+#   3. An inner tar.xz archive with the full application files
+#
+# IMPORTANT: Do NOT use --noexec — it prevents the embedded setup script
+# from running, which means the inner tar.xz is never extracted.
 ARG TS3_CLIENT_VERSION=3.6.2
-RUN wget -q "https://files.teamspeak-services.com/releases/client/${TS3_CLIENT_VERSION}/TeamSpeak3-Client-linux_amd64-${TS3_CLIENT_VERSION}.run" \
-    -O /tmp/ts3client.run \
-    && chmod +x /tmp/ts3client.run \
-    && echo "y" | /tmp/ts3client.run --noexec --target /tmp/ts3client_extract \
-    && echo "=== Extracted files (top-level) ===" \
-    && ls -la /tmp/ts3client_extract/ \
-    && echo "=== Extracting inner archives if any ===" \
-    && (cd /tmp/ts3client_extract \
-        && for f in *.tar.xz *.tar.gz *.tar.bz2 *.tgz; do \
-            [ -f "$f" ] && echo "Extracting $f..." && tar xf "$f" && break; \
-        done; \
-        true) \
+COPY TeamSpeak3-Client-linux_amd64-${TS3_CLIENT_VERSION}.run /tmp/ts3client.run
+RUN chmod +x /tmp/ts3client.run \
+    && cd /tmp \
+    # Run the TS3 installer (without --noexec).
+    # PAGER=cat  → prevents the license pager (less/more) from blocking
+    # yes        → pipes 'y' repeatedly to accept the license prompt
+    # --nox11    → skips X11 availability checks (we provide Xvfb at runtime)
+    && PAGER=cat yes | /tmp/ts3client.run --nox11 \
+    && echo "=== Extracted contents ===" \
+    && ls -la /tmp/TeamSpeak3-Client-linux_amd64/ 2>/dev/null || echo "Directory not found" \
+    # Copy extracted files to /opt/ts3client
     && mkdir -p /opt/ts3client \
-    && echo "=== Copying extracted files ===" \
-    && if ls -d /tmp/ts3client_extract/*/ >/dev/null 2>&1; then \
-        cp -r /tmp/ts3client_extract/*/. /opt/ts3client/; \
-       else \
-        cp -r /tmp/ts3client_extract/. /opt/ts3client/; \
+    && if [ -d "/tmp/TeamSpeak3-Client-linux_amd64" ]; then \
+        cp -r /tmp/TeamSpeak3-Client-linux_amd64/. /opt/ts3client/; \
        fi \
-    && echo "=== TS3 Client directory structure (root level) ===" \
+    && echo "=== Final /opt/ts3client ===" \
     && ls -la /opt/ts3client/ \
-    && echo "=== TS3 Client executables (maxdepth 3) ===" \
-    && find /opt/ts3client -maxdepth 3 -type f -executable | head -30 \
+    && echo "=== TS3 Client files (maxdepth 3) ===" \
+    && find /opt/ts3client -maxdepth 3 -type f | head -40 \
     && find /opt/ts3client -maxdepth 3 -type f -executable -exec chmod +x {} \; \
     && find /opt/ts3client -maxdepth 3 -type f ! -executable \( -name "ts3*" -o -name "TeamSpeak*" -o -name "teamspeak*" \) -exec chmod +x {} \; \
-    && rm -rf /tmp/ts3client.run /tmp/ts3client_extract
+    && rm -f /tmp/ts3client.run && rm -rf /tmp/TeamSpeak3-Client-linux_amd64
 
 # ── Python dependencies ──────────────────────────
 COPY requirements.txt /opt/bot/requirements.txt

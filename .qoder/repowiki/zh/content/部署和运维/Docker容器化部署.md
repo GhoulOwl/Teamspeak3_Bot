@@ -79,12 +79,12 @@ Bot --> Config
 ```
 
 **图表来源**
-- [Dockerfile:1-112](file://Dockerfile#L1-L112)
+- [Dockerfile:1-132](file://Dockerfile#L1-L132)
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
-- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
+- [docker/entrypoint.sh:1-131](file://docker/entrypoint.sh#L1-L131)
 
 **章节来源**
-- [Dockerfile:1-112](file://Dockerfile#L1-L112)
+- [Dockerfile:1-132](file://Dockerfile#L1-L132)
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
 
 ## 核心组件
@@ -96,11 +96,11 @@ Bot --> Config
 - **Dockerfile**：定义基础镜像、系统依赖、Python依赖、应用代码复制、用户与权限、PulseAudio配置以及入口点。**更新** 移除了process manager依赖，简化了镜像构建过程。
 
 **章节来源**
-- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
+- [docker/entrypoint.sh:1-131](file://docker/entrypoint.sh#L1-L131)
 - [docker/ts3client/init_identity.py:1-92](file://docker/ts3client/init_identity.py#L1-L92)
 - [docker/pulseaudio/default.pa:1-20](file://docker/pulseaudio/default.pa#L1-L20)
 - [config/config.yaml:1-76](file://config/config.yaml#L1-L76)
-- [Dockerfile:1-112](file://Dockerfile#L1-L112)
+- [Dockerfile:1-132](file://Dockerfile#L1-L132)
 
 ## 架构总览
 容器内采用直接bash脚本管理多个子进程，确保各组件按序启动与自愈。TS3客户端通过headless模式运行，配合PulseAudio的null sink实现无显示器音频播放。Python Bot通过FastAPI提供Webhook服务（可选），并通过ServerQuery与TS3服务器交互。
@@ -126,7 +126,7 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 ```
 
 **图表来源**
-- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
+- [docker/entrypoint.sh:1-131](file://docker/entrypoint.sh#L1-L131)
 
 ## 详细组件分析
 
@@ -140,7 +140,7 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 - 运行时设置：创建ts3bot用户与数据目录，设置权限；复制PulseAudio配置；复制入口脚本并赋予执行权限；设置工作目录与入口点。
 
 **章节来源**
-- [Dockerfile:1-112](file://Dockerfile#L1-L112)
+- [Dockerfile:1-132](file://Dockerfile#L1-L132)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
 ### docker-compose.yml服务编排
@@ -167,7 +167,7 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 **更新** 完全移除了Supervisor依赖，采用直接bash脚本管理进程，提供了更简洁的进程管理方式。
 
 **章节来源**
-- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
+- [docker/entrypoint.sh:1-131](file://docker/entrypoint.sh#L1-L131)
 
 ### TS3客户端初始化
 - 功能：在/home/ts3bot/.ts3client/settings.db不存在时创建数据库，配置音频设备使用PulseAudio的ts3bot_sink；写入自动连接书签（从环境变量TS3_HOST、TS3_VOICE_PORT、TS3_NICKNAME读取）。
@@ -245,13 +245,13 @@ TS3Client --> BotProc["Python Bot 进程"]
 ```
 
 **图表来源**
-- [Dockerfile:1-112](file://Dockerfile#L1-L112)
-- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
+- [Dockerfile:1-132](file://Dockerfile#L1-L132)
+- [docker/entrypoint.sh:1-131](file://docker/entrypoint.sh#L1-L131)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
 **章节来源**
-- [Dockerfile:1-112](file://Dockerfile#L1-L112)
-- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
+- [Dockerfile:1-132](file://Dockerfile#L1-L132)
+- [docker/entrypoint.sh:1-131](file://docker/entrypoint.sh#L1-L131)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
 ## 性能考虑
@@ -297,7 +297,7 @@ TS3Client --> BotProc["Python Bot 进程"]
 **更新** 新增了基于直接进程管理和用户模式音频的故障排除指南。
 
 **章节来源**
-- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
+- [docker/entrypoint.sh:1-131](file://docker/entrypoint.sh#L1-L131)
 - [docker/ts3client/init_identity.py:1-92](file://docker/ts3client/init_identity.py#L1-L92)
 - [config/config.yaml:1-76](file://config/config.yaml#L1-L76)
 - [docker-compose.yml:6-10](file://docker-compose.yml#L6-L10)
@@ -331,4 +331,4 @@ TS3Client --> BotProc["Python Bot 进程"]
 
 **章节来源**
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
-- [Dockerfile:1-112](file://Dockerfile#L1-L112)
+- [Dockerfile:1-132](file://Dockerfile#L1-L132)
