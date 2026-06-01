@@ -14,11 +14,11 @@
 
 ## 更新摘要
 **变更内容**
-- 从Supervisor进程管理迁移到直接bash脚本管理，简化了进程管理架构
-- 改进了PulseAudio系统模式配置，使用`--system`标志启动以获得更好的容器内音频支持
+- 完全移除了Supervisor进程管理依赖，采用直接bash脚本管理进程
+- 将PulseAudio配置从系统模式改为用户模式，解决了权限问题
 - 增强了TeamSpeak3客户端检测逻辑，支持多种二进制文件命名模式
-- 移除了supervisord.conf依赖，采用更直接的进程管理方式
-- 更新了容器启动流程，采用更简洁的进程管理策略
+- 更新了容器启动流程，采用更简洁的直接进程管理方式
+- 移除了supervisord.conf配置文件，简化了进程管理架构
 
 ## 目录
 1. [简介](#简介)
@@ -41,7 +41,7 @@
 - 部署步骤、镜像构建命令与容器运行示例
 - 常见部署问题解决方案与最佳实践
 
-**更新** Dockerfile经过重大改进，移除了Supervisor依赖，采用直接bash脚本管理进程，改进了PulseAudio系统模式配置，增强了TeamSpeak3客户端安装过程。
+**更新** Dockerfile经过重大改进，完全移除了Supervisor依赖，采用直接bash脚本管理进程，改进了PulseAudio用户模式配置，增强了TeamSpeak3客户端安装过程。
 
 ## 项目结构
 该项目采用分层组织方式，Docker相关配置集中在docker目录中，应用代码位于bot目录，配置文件位于config目录。Dockerfile负责构建镜像，docker-compose.yml负责编排单容器服务，入口脚本直接管理多进程。
@@ -57,7 +57,7 @@ end
 subgraph "容器: ts3bot"
 Entrypoint["/entrypoint.sh"]
 Xvfb["虚拟显示 Xvfb"]
-Pulse["PulseAudio (系统模式)"]
+Pulse["PulseAudio (用户模式)"]
 NullSink["PulseAudio Null Sink"]
 TS3Client["TeamSpeak3 客户端"]
 Bot["Python Bot 应用"]
@@ -79,28 +79,28 @@ Bot --> Config
 ```
 
 **图表来源**
-- [Dockerfile:1-101](file://Dockerfile#L1-L101)
+- [Dockerfile:1-112](file://Dockerfile#L1-L112)
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
-- [docker/entrypoint.sh:1-103](file://docker/entrypoint.sh#L1-L103)
+- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
 
 **章节来源**
-- [Dockerfile:1-101](file://Dockerfile#L1-L101)
+- [Dockerfile:1-112](file://Dockerfile#L1-L112)
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
 
 ## 核心组件
-- **直接进程管理脚本**：在容器启动时初始化目录与TS3客户端身份，然后通过bash脚本直接管理Xvfb、PulseAudio、TS3客户端与Python Bot进程。**更新** 移除了Supervisor依赖，采用更简洁的进程管理方式。
-- **改进的PulseAudio配置**：使用系统模式启动PulseAudio (`--system`)，提供更好的容器内音频支持和资源管理。
+- **直接进程管理脚本**：在容器启动时初始化目录与TS3客户端身份，然后通过bash脚本直接管理Xvfb、PulseAudio、TS3客户端与Python Bot进程。**更新** 完全移除了Supervisor依赖，采用更简洁的进程管理方式。
+- **改进的PulseAudio配置**：使用用户模式启动PulseAudio，提供更好的容器内音频支持和资源管理，避免了系统模式的权限问题。
 - **增强的TS3客户端检测逻辑**：入口脚本现在包含多种TS3客户端二进制文件的查找策略，支持多种命名模式和回退机制。
 - **TS3客户端初始化脚本**：在首次运行时生成settings.db，配置音频设备使用PulseAudio的null sink，并写入自动连接书签。
 - **应用配置**：通过YAML配置文件与环境变量插值，支持TS3、音频、网易云音乐、AI聊天、自动化、调度、Webhook与日志等模块。
 - **Dockerfile**：定义基础镜像、系统依赖、Python依赖、应用代码复制、用户与权限、PulseAudio配置以及入口点。**更新** 移除了process manager依赖，简化了镜像构建过程。
 
 **章节来源**
-- [docker/entrypoint.sh:1-103](file://docker/entrypoint.sh#L1-L103)
+- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
 - [docker/ts3client/init_identity.py:1-92](file://docker/ts3client/init_identity.py#L1-L92)
 - [docker/pulseaudio/default.pa:1-20](file://docker/pulseaudio/default.pa#L1-L20)
 - [config/config.yaml:1-76](file://config/config.yaml#L1-L76)
-- [Dockerfile:1-101](file://Dockerfile#L1-L101)
+- [Dockerfile:1-112](file://Dockerfile#L1-L112)
 
 ## 架构总览
 容器内采用直接bash脚本管理多个子进程，确保各组件按序启动与自愈。TS3客户端通过headless模式运行，配合PulseAudio的null sink实现无显示器音频播放。Python Bot通过FastAPI提供Webhook服务（可选），并通过ServerQuery与TS3服务器交互。
@@ -109,14 +109,14 @@ Bot --> Config
 sequenceDiagram
 participant Entrypoint as "入口脚本"
 participant Xvfb as "Xvfb 虚拟显示"
-participant Pulse as "PulseAudio (系统模式)"
+participant Pulse as "PulseAudio (用户模式)"
 participant NullSink as "Null Sink"
 participant TS3 as "TS3 客户端"
 participant Bot as "Python Bot 应用"
 Entrypoint->>Entrypoint : 创建运行时目录
 Entrypoint->>Entrypoint : 初始化TS3客户端身份
 Entrypoint->>Xvfb : 启动虚拟显示
-Entrypoint->>Pulse : 启动PulseAudio (系统模式)
+Entrypoint->>Pulse : 启动PulseAudio (用户模式)
 Entrypoint->>NullSink : 加载null sink并设置默认设备
 Entrypoint->>TS3 : 启动TS3客户端 (增强检测逻辑)
 Entrypoint->>Bot : 启动Python Bot
@@ -126,21 +126,21 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 ```
 
 **图表来源**
-- [docker/entrypoint.sh:1-103](file://docker/entrypoint.sh#L1-L103)
+- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
 
 ## 详细组件分析
 
 ### Dockerfile构建流程
 - 基础镜像与环境变量：基于python:3.12-slim-bookworm，设置非交互式前端以避免安装时的交互提示。
 - 系统包安装：安装虚拟显示（Xvfb）、音频（PulseAudio及其工具）、音视频解码（FFmpeg）、TS3客户端依赖库（Qt5、X11、SSL、DBus、GL等）、实用工具（wget、bzip2、xdotool、sqlite3）。
-- **移除的依赖**：process manager（Supervisor）已被移除，简化了镜像构建过程。
+- **移除的依赖**：process manager（Supervisor）已被移除，简化了镜像构建过程。**更新** 在第53行注释掉了相关依赖。
 - TeamSpeak3客户端：通过参数化版本号下载并解压到/opt/ts3client，设置运行脚本可执行权限。**更新** 使用TS3_CLIENT_VERSION参数控制版本，提供更灵活的版本管理。
 - Python依赖：复制requirements.txt并安装，确保无缓存以减小镜像体积。
 - 应用代码复制：复制bot、config、docker目录至/opt/bot。
 - 运行时设置：创建ts3bot用户与数据目录，设置权限；复制PulseAudio配置；复制入口脚本并赋予执行权限；设置工作目录与入口点。
 
 **章节来源**
-- [Dockerfile:1-101](file://Dockerfile#L1-L101)
+- [Dockerfile:1-112](file://Dockerfile#L1-L112)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
 ### docker-compose.yml服务编排
@@ -159,15 +159,15 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 
 ### 容器启动脚本与直接进程管理
 - **直接进程管理**：入口脚本现在直接管理所有进程，不再依赖Supervisor。创建/data/cache、/data/logs、/home/ts3bot/.ts3client等运行时目录；首次运行时调用init_identity.py初始化TS3客户端身份；启动Xvfb、PulseAudio、TS3客户端和Python Bot。
-- **改进的PulseAudio启动**：使用`pulseaudio --system --exit-idle-time=-1 --daemonize`启动，提供更好的容器内音频支持。
+- **改进的PulseAudio启动**：使用用户模式启动PulseAudio，避免了系统模式的权限问题。**更新** 从系统模式改为用户模式，提供更好的容器内音频支持。
 - **增强的错误处理**：在每个进程启动后都添加了错误处理和日志记录，如果初始化失败会跳过并使用默认设置。
 - **进程管理**：每个进程启动后都会保存PID，便于后续的进程监控和管理。
 - **增强的TS3客户端检测**：现在包含多种TS3客户端二进制文件的查找策略，支持多种命名模式和回退机制。
 
-**更新** 移除了Supervisor依赖，采用直接bash脚本管理进程，提供了更简洁的进程管理方式。
+**更新** 完全移除了Supervisor依赖，采用直接bash脚本管理进程，提供了更简洁的进程管理方式。
 
 **章节来源**
-- [docker/entrypoint.sh:1-103](file://docker/entrypoint.sh#L1-L103)
+- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
 
 ### TS3客户端初始化
 - 功能：在/home/ts3bot/.ts3client/settings.db不存在时创建数据库，配置音频设备使用PulseAudio的ts3bot_sink；写入自动连接书签（从环境变量TS3_HOST、TS3_VOICE_PORT、TS3_NICKNAME读取）。
@@ -180,12 +180,12 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 - [docker/ts3client/init_identity.py:1-92](file://docker/ts3client/init_identity.py#L1-L92)
 
 ### 改进的PulseAudio配置
-- **系统模式启动**：使用`pulseaudio --system`启动，提供更好的容器内音频支持和资源管理。
+- **用户模式启动**：使用用户模式启动PulseAudio，提供更好的容器内音频支持和资源管理，避免了系统模式的权限问题。
 - 功能：加载ts3bot_sink作为null sink，设置为默认sink与source；启用本地Unix域套接字协议供容器内应用访问；禁用自动挂起以保证Docker环境稳定性。
 - **改进的模块加载**：增加了module-always-sink和module-rescue-streams模块，提高音频流的稳定性。
 - **增强的错误处理**：在加载模块和设置默认设备时都添加了错误处理，如果失败会显示错误信息但不会阻止容器启动。
 
-**更新** PulseAudio配置采用了系统模式启动，提供了更好的容器内音频支持。
+**更新** PulseAudio配置从系统模式改为用户模式，提供了更好的容器内音频支持。
 
 **章节来源**
 - [docker/pulseaudio/default.pa:1-20](file://docker/pulseaudio/default.pa#L1-L20)
@@ -240,29 +240,29 @@ Bot --> TS3["TS3 ServerQuery"]
 Bot --> Webhook["FastAPI/Uvicorn"]
 Bot --> FFmpeg["FFmpeg"]
 Xvfb["Xvfb"] --> TS3Client["TS3 客户端"]
-Pulse["PulseAudio (系统模式)"] --> NullSink["Null Sink"]
+Pulse["PulseAudio (用户模式)"] --> NullSink["Null Sink"]
 TS3Client --> BotProc["Python Bot 进程"]
 ```
 
 **图表来源**
-- [Dockerfile:1-101](file://Dockerfile#L1-L101)
-- [docker/entrypoint.sh:1-103](file://docker/entrypoint.sh#L1-L103)
+- [Dockerfile:1-112](file://Dockerfile#L1-L112)
+- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
 **章节来源**
-- [Dockerfile:1-101](file://Dockerfile#L1-L101)
-- [docker/entrypoint.sh:1-103](file://docker/entrypoint.sh#L1-L103)
+- [Dockerfile:1-112](file://Dockerfile#L1-L112)
+- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
 ## 性能考虑
 - 共享内存：shm_size设置为256m，满足容器内多媒体处理需求。
 - 临时文件系统：/tmp与PulseAudio socket使用tmpfs，减少磁盘IO，提高响应速度。
-- **改进的PulseAudio配置**：系统模式启动提供更好的资源管理和音频稳定性。
+- **改进的PulseAudio配置**：用户模式启动提供更好的资源管理和音频稳定性。
 - **直接进程管理**：移除了Supervisor的额外开销，减少了进程间通信的复杂性。
 - 缓存与日志：/data/cache与/data/logs挂载到命名卷，便于持久化与性能优化。
 - **平台性能**：linux/amd64架构提供最佳的兼容性和性能表现，避免跨架构带来的性能损失。
 
-**更新** 移除了Supervisor依赖，采用了更直接的进程管理方式，提高了整体性能和稳定性。
+**更新** 完全移除了Supervisor依赖，采用了更直接的进程管理方式，提高了整体性能和稳定性。
 
 ## 故障排除指南
 - TS3客户端无法连接或无声音
@@ -291,19 +291,19 @@ TS3Client --> BotProc["Python Bot 进程"]
 - **新故障排除功能**
   - **调试模式**：入口脚本现在包含详细的调试输出，可以在启动时看到每个步骤的状态
   - **进程监控**：所有进程都有独立的日志文件，便于定位具体问题
-  - **系统模式音频**：PulseAudio系统模式提供了更好的容器内音频支持和资源管理
+  - **用户模式音频**：PulseAudio用户模式提供了更好的容器内音频支持和资源管理
   - **增强的TS3检测**：入口脚本现在提供详细的TS3客户端二进制文件查找调试信息
 
-**更新** 新增了基于直接进程管理和系统模式音频的故障排除指南。
+**更新** 新增了基于直接进程管理和用户模式音频的故障排除指南。
 
 **章节来源**
-- [docker/entrypoint.sh:1-103](file://docker/entrypoint.sh#L1-L103)
+- [docker/entrypoint.sh:1-113](file://docker/entrypoint.sh#L1-L113)
 - [docker/ts3client/init_identity.py:1-92](file://docker/ts3client/init_identity.py#L1-L92)
 - [config/config.yaml:1-76](file://config/config.yaml#L1-L76)
 - [docker-compose.yml:6-10](file://docker-compose.yml#L6-L10)
 
 ## 结论
-该容器化方案通过Dockerfile精确控制系统与Python依赖，结合直接bash脚本管理多进程，实现了TS3客户端headless运行与Python Bot的稳定服务。**经过重大改进的Dockerfile移除了Supervisor依赖，采用直接bash脚本管理进程，改进了PulseAudio系统模式配置，增强了TeamSpeak3客户端安装过程**。docker-compose.yml提供了灵活的卷挂载与环境变量配置，新增的平台特定配置确保了在linux/amd64架构上的最佳兼容性和性能。遵循本文档的部署步骤与最佳实践，可快速完成容器化部署并解决常见问题。
+该容器化方案通过Dockerfile精确控制系统与Python依赖，结合直接bash脚本管理多进程，实现了TS3客户端headless运行与Python Bot的稳定服务。**经过重大改进的Dockerfile完全移除了Supervisor依赖，采用直接bash脚本管理进程，改进了PulseAudio用户模式配置，增强了TeamSpeak3客户端安装过程**。docker-compose.yml提供了灵活的卷挂载与环境变量配置，新增的平台特定配置确保了在linux/amd64架构上的最佳兼容性和性能。遵循本文档的部署步骤与最佳实践，可快速完成容器化部署并解决常见问题。
 
 **更新** 强调Dockerfile重大改进的重要性，确保部署的稳定性和性能。
 
@@ -331,4 +331,4 @@ TS3Client --> BotProc["Python Bot 进程"]
 
 **章节来源**
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
-- [Dockerfile:1-101](file://Dockerfile#L1-L101)
+- [Dockerfile:1-112](file://Dockerfile#L1-L112)

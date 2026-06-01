@@ -11,14 +11,17 @@
 - [config.py](file://bot/config.py)
 - [config.yaml](file://config/config.yaml)
 - [docker-compose.yml](file://docker-compose.yml)
+- [Dockerfile](file://Dockerfile)
+- [entrypoint.sh](file://docker/entrypoint.sh)
+- [default.pa](file://docker/pulseaudio/default.pa)
 </cite>
 
 ## 更新摘要
 **变更内容**
-- macOS平台从Core Audio迁移到AudioToolbox，使用`-f audiotoolbox`输出格式
-- 改进的跨平台检测机制，统一使用`platform.system() == "Darwin"`进行平台判断
-- 增强的错误处理和资源清理机制，包括更好的进程监控和清理逻辑
-- 优化的音量控制策略，macOS平台仅使用FFmpeg音量控制，Linux平台使用pactl
+- **PULSE_SERVER环境变量设置**：在Docker入口脚本中设置PULSE_SERVER环境变量为`unix:/tmp/pulse-native`，优化PulseAudio连接配置
+- **PulseAudio服务器参数优化**：改进了Linux平台的PulseAudio服务器参数配置，使用更稳定的本地套接字连接
+- **音频输出格式优化**：优化了Linux平台的音频输出格式配置，确保与PulseAudio本地协议的兼容性
+- **容器化部署增强**：完善了Docker环境中的PulseAudio配置，包括客户端配置文件和本地协议模块
 
 ## 目录
 1. [简介](#简介)
@@ -36,6 +39,7 @@
 ## 简介
 本技术文档聚焦于FFmpeg集成模块，系统性阐述 FFmpegProcess 类的架构设计与实现原理，覆盖以下关键主题：
 - **跨平台FFmpeg集成**：支持Linux PulseAudio和macOS AudioToolbox的自动检测与配置
+- **PULSE_SERVER环境变量优化**：改进PulseAudio连接配置，使用稳定的本地套接字连接
 - FFmpeg 进程生命周期管理：启动、暂停/恢复、优雅停止与强制终止
 - 异步机制：基于 asyncio 的子进程与标准错误流监控
 - 回调系统：EOF 与错误事件的处理流程
@@ -63,6 +67,10 @@ subgraph "配置与环境"
 CFG["配置加载<br/>bot/config.py"]
 YAML["配置文件<br/>config/config.yaml"]
 DC["Docker配置<br/>docker-compose.yml"]
+ENV["环境变量<br/>PULSE_SERVER=unix:/tmp/pulse-native"]
+PA["PulseAudio配置<br/>docker/pulseaudio/default.pa"]
+END["入口脚本<br/>docker/entrypoint.sh"]
+DF["Dockerfile<br/>PULSE_SERVER配置"]
 end
 CMD --> AC
 AC --> FF
@@ -73,6 +81,10 @@ APP --> CMD
 FF --> CFG
 CFG --> YAML
 APP --> DC
+DC --> ENV
+DC --> PA
+DC --> END
+DC --> DF
 ```
 
 **图表来源**
@@ -82,6 +94,9 @@ APP --> DC
 - [config.py:125-160](file://bot/config.py#L125-L160)
 - [config.yaml:14-21](file://config/config.yaml#L14-L21)
 - [docker-compose.yml:1-33](file://docker-compose.yml#L1-L33)
+- [entrypoint.sh:45-46](file://docker/entrypoint.sh#L45-L46)
+- [default.pa:11-12](file://docker/pulseaudio/default.pa#L11-L12)
+- [Dockerfile:94-96](file://Dockerfile#L94-L96)
 
 ## 核心组件
 - **FFmpegProcess**：封装单个 FFmpeg 子进程的创建、运行、监控与终止，负责将音频流解码并输出到平台特定的音频系统（Linux: PulseAudio, macOS: AudioToolbox）。
@@ -116,6 +131,7 @@ CMD->>AC : "play(url)"
 AC->>FF : "start(url, volume)"
 Note over FF : "平台检测 : Darwin?"
 FF->>FF : "Linux : -f pulse<br/>macOS : -f audiotoolbox"
+Note over FF : "PULSE_SERVER=unix : /tmp/pulse-native"
 FF-->>AC : "stderr监控(日志/EOF/错误)"
 AC-->>APP : "on_stopped/on_error"
 APP->>MQ : "next()"
@@ -141,6 +157,7 @@ APP->>AC : "play(next_url)"
 - **启动流程**
   - 构建命令行参数：重连策略、输入源、音量滤镜、输出格式与目标接收器、采样率/声道、禁用交互等。
   - **更新**：根据平台选择输出格式：Linux使用 `-f pulse`，macOS使用 `-f audiotoolbox`。
+  - **更新**：Linux平台使用优化的PulseAudio服务器参数`-server unix:/tmp/pulse-native`，确保与PULSE_SERVER环境变量的一致性。
   - 使用 asyncio 子进程接口创建进程，并启动 stderr 监控任务。
 - **停止与终止**
   - 取消监控任务；尝试优雅终止（SIGTERM），超时则强制终止（SIGKILL）；捕获进程不存在异常。
@@ -281,6 +298,7 @@ CMD->>AC : "play(url)"
 AC->>FF : "start(url, volume)"
 Note over FF : "平台检测 : Darwin?"
 FF->>FF : "Linux : -f pulse<br/>macOS : -f audiotoolbox"
+Note over FF : "PULSE_SERVER=unix : /tmp/pulse-native"
 FF-->>AC : "EOF/错误回调"
 AC-->>APP : "on_stopped/on_error"
 APP->>MQ : "next()"
@@ -317,6 +335,24 @@ FFmpeg集成模块实现了智能的跨平台支持，通过以下机制实现�
   - **macOS**: 仅支持FFmpeg级别的音量控制
   - **Windows**: 需要平台特定的音量控制实现
 
+### PULSE_SERVER环境变量配置
+**更新**：为了优化PulseAudio连接配置，系统引入了PULSE_SERVER环境变量设置：
+
+- **环境变量设置**
+  - 在Docker入口脚本中设置`PULSE_SERVER=unix:/tmp/pulse-native`
+  - 确保FFmpeg与PulseAudio使用相同的本地套接字连接
+  - 提高容器化环境中的音频连接稳定性
+
+- **PulseAudio服务器参数优化**
+  - Linux平台使用`-server unix:/tmp/pulse-native`参数
+  - 与PULSE_SERVER环境变量保持一致
+  - 改善音频输出的可靠性和性能
+
+- **Docker配置支持**
+  - Dockerfile中配置PulseAudio客户端默认服务器
+  - default.pa配置文件启用本地协议模块
+  - 完整的PulseAudio本地套接字配置
+
 ### 配置系统支持
 - **配置模型**
   - AudioConfig包含平台无关的音频配置
@@ -326,10 +362,12 @@ FFmpeg集成模块实现了智能的跨平台支持，通过以下机制实现�
 - **环境变量支持**
   - 配置文件支持环境变量插值
   - Docker环境中通过环境变量传递配置参数
+  - **更新**：PULSE_SERVER环境变量自动配置
 
 - **Docker部署**
   - Docker Compose配置支持跨平台部署
   - 共享内存和卷挂载确保音频功能正常工作
+  - **更新**：完整的PulseAudio容器化配置
 
 **章节来源**
 - [ffmpeg.py:39-91](file://bot/core/audio/ffmpeg.py#L39-L91)
@@ -338,6 +376,9 @@ FFmpeg集成模块实现了智能的跨平台支持，通过以下机制实现�
 - [config.py:48-55](file://bot/config.py#L48-L55)
 - [config.yaml:14-21](file://config/config.yaml#L14-L21)
 - [docker-compose.yml:1-33](file://docker-compose.yml#L1-L33)
+- [entrypoint.sh:45-46](file://docker/entrypoint.sh#L45-L46)
+- [default.pa:11-12](file://docker/pulseaudio/default.pa#L11-L12)
+- [Dockerfile:94-96](file://Dockerfile#L94-L96)
 
 ## 依赖关系分析
 - **内部依赖**
@@ -351,6 +392,7 @@ FFmpeg集成模块实现了智能的跨平台支持，通过以下机制实现�
 - **配置与环境**
   - 通过配置模型统一管理音频、TS3、调度、Webhook 等参数。
   - Docker环境提供跨平台部署支持。
+  - **更新**：PULSE_SERVER环境变量提供统一的PulseAudio连接配置。
 
 ```mermaid
 graph LR
@@ -363,6 +405,7 @@ CMD --> NC["NeteaseAPIClient"]
 FF --> CFG["BotConfig"]
 CFG --> YAML["config.yaml"]
 APP --> DC["Docker配置"]
+DC --> ENV["PULSE_SERVER环境变量"]
 ```
 
 **图表来源**
@@ -387,16 +430,19 @@ APP --> DC["Docker配置"]
 - **跨平台优化**
   - **更新**：平台检测在初始化时完成，避免运行时重复判断。
   - **更新**：Linux平台的音量控制使用pactl，macOS平台直接使用FFmpeg，减少不必要的系统调用。
+  - **更新**：PULSE_SERVER环境变量优化了PulseAudio连接性能，减少连接建立时间。
 
 ## 故障排除指南
 - **FFmpeg 无法启动**
   - 检查 ffmpeg 可执行路径与权限；确认平台特定的音频系统可用。
   - 查看启动日志与标准错误流中的具体错误信息。
   - **更新**：确认平台检测结果正确（Darwin vs Linux）。
+  - **更新**：检查PULSE_SERVER环境变量是否正确设置。
 - **播放无声或音量异常**
   - 确认平台特定的音频系统存在且可用。
   - **更新**：macOS平台仅支持FFmpeg音量控制，检查FFmpeg volume滤镜设置。
   - **更新**：Linux平台检查pactl是否可用和PulseAudio配置。
+  - **更新**：验证PULSE_SERVER环境变量与FFmpeg服务器参数的一致性。
 - **播放卡住或无法停止**
   - 确保监控任务未被意外取消；停止时等待进程退出，必要时强制终止。
 - **URL 提取失败**
@@ -404,14 +450,24 @@ APP --> DC["Docker配置"]
 - **容器内音频问题**
   - 检查 Docker Compose 的共享内存与卷挂载；确认音频系统配置已生效。
   - **更新**：确认Docker环境中的音频设备访问权限。
+  - **更新**：验证PULSE_SERVER环境变量在容器内的正确传递。
+- **PulseAudio连接问题**
+  - **更新**：检查PULSE_SERVER环境变量是否设置为`unix:/tmp/pulse-native`。
+  - **更新**：验证PulseAudio本地协议模块是否正确加载。
+  - **更新**：确认PulseAudio服务器套接字文件存在且可访问。
 
 **章节来源**
 - [ffmpeg.py:94-115](file://bot/core/audio/ffmpeg.py#L94-L115)
 - [volume.py:77-109](file://bot/core/audio/volume.py#L77-L109)
 - [docker-compose.yml:9-26](file://docker-compose.yml#L9-L26)
+- [entrypoint.sh:45-46](file://docker/entrypoint.sh#L45-L46)
 
 ## 结论
-本集成方案通过清晰的分层设计与异步化实现，提供了稳定可靠的跨平台音频播放能力。FFmpegProcess 负责底层进程与流处理，支持Linux PulseAudio和macOS AudioToolbox的自动检测与配置；AudioController 提供高层状态与事件管理；VolumeController 实现平台特定的平滑音量控制；BotApplication 则将各模块有机串联，形成完整的播放闭环。结合队列管理与命令系统，实现了从点歌到自动播放的完整体验。未来可在Windows平台支持、错误重试与监控告警等方面进一步增强。
+本集成方案通过清晰的分层设计与异步化实现，提供了稳定可靠的跨平台音频播放能力。FFmpegProcess 负责底层进程与流处理，支持Linux PulseAudio和macOS AudioToolbox的自动检测与配置；AudioController 提供高层状态与事件管理；VolumeController 实现平台特定的平滑音量控制；BotApplication 则将各模块有机串联，形成完整的播放闭环。结合队列管理与命令系统，实现了从点歌到自动播放的完整体验。
+
+**更新**：本次更新增强了PULSE_SERVER环境变量配置和PulseAudio连接优化，提高了Linux平台音频输出的稳定性和性能。通过环境变量与命令行参数的双重配置，确保了PulseAudio连接的一致性和可靠性。完善的Docker配置支持使得容器化部署更加简单可靠。
+
+未来可在Windows平台支持、错误重试与监控告警、PulseAudio连接池管理等方面进一步增强。
 
 ## 附录
 
@@ -421,16 +477,19 @@ APP --> DC["Docker配置"]
 - **音频滤镜**
   - volume 滤镜用于初始音量设置；运行中通过平台特定方式微调。
 - **输出格式与目标**
-  - **Linux**: 使用 pulse 输出格式与指定接收器名称。
+  - **Linux**: 使用 pulse 输出格式与指定接收器名称，优化服务器参数配置。
   - **macOS**: 使用 audiotoolbox 输出格式到系统默认音频设备。
 - **采样率与声道**
   - 与配置一致，保证与客户端/硬件兼容。
 - **其他**
   - 禁用交互、覆盖输出等选项，适配无人值守运行。
+- **PULSE_SERVER优化**
+  - **更新**：Linux平台使用`-server unix:/tmp/pulse-native`参数，与PULSE_SERVER环境变量保持一致。
 
 **章节来源**
 - [ffmpeg.py:66-93](file://bot/core/audio/ffmpeg.py#L66-L93)
 - [config.py:48-55](file://bot/config.py#L48-L55)
+- [ffmpeg.py:92-96](file://bot/core/audio/ffmpeg.py#L92-L96)
 
 ### 音频格式转换与流媒体处理
 - **解复用/解码**
@@ -440,10 +499,14 @@ APP --> DC["Docker配置"]
 - **平台特定输出**
   - **Linux**: 直接写入PulseAudio接收器，避免额外中间缓冲与拷贝。
   - **macOS**: 直接写入系统AudioToolbox，利用系统音频路由。
+- **PulseAudio连接优化**
+  - **更新**：使用PULSE_SERVER环境变量确保连接稳定性。
+  - **更新**：优化服务器参数配置，提高音频输出性能。
 
 **章节来源**
 - [ffmpeg.py:19-21](file://bot/core/audio/ffmpeg.py#L19-L21)
 - [ffmpeg.py:88-91](file://bot/core/audio/ffmpeg.py#L88-L91)
+- [entrypoint.sh:45-46](file://docker/entrypoint.sh#L45-L46)
 
 ### 进程监控、资源清理与异常恢复
 - **监控**
@@ -464,8 +527,16 @@ APP --> DC["Docker配置"]
 - **Docker 环境**
   - 提供跨平台部署支持，包含音频设备访问权限配置。
   - **更新**：Docker Compose配置支持不同平台的音频系统。
+  - **更新**：完整的PulseAudio容器化配置，包括环境变量设置。
+- **PULSE_SERVER环境变量**
+  - **更新**：在Docker入口脚本中设置PULSE_SERVER=unix:/tmp/pulse-native。
+  - **更新**：Dockerfile中配置PulseAudio客户端默认服务器。
+  - **更新**：default.pa配置文件启用本地协议模块。
 
 **章节来源**
 - [config.py:125-160](file://bot/config.py#L125-L160)
 - [config.yaml:14-21](file://config/config.yaml#L14-L21)
 - [docker-compose.yml:1-33](file://docker-compose.yml#L1-L33)
+- [entrypoint.sh:45-46](file://docker/entrypoint.sh#L45-L46)
+- [Dockerfile:94-96](file://Dockerfile#L94-L96)
+- [default.pa:11-12](file://docker/pulseaudio/default.pa#L11-L12)
