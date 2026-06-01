@@ -65,6 +65,10 @@ else
     cat /data/logs/pulseaudio.log 2>/dev/null || echo "No log file"
 fi
 
+# ── Global environment for TS3 Client and Bot ──
+export DISPLAY=:99
+export PULSE_SERVER=unix:/tmp/pulse-native
+
 # ── Start TS3 Client ─────────────────────────────
 echo "Starting TS3 Client..."
 cd /opt/ts3client
@@ -144,6 +148,4 @@ fi
 # ── Start Python Bot ─────────────────────────────
 echo "Starting Python Bot..."
 cd /opt/bot
-export PULSE_SERVER=unix:/tmp/pulse-native
-export DISPLAY=:99
 exec python3 -m bot
