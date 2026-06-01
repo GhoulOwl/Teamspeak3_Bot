@@ -65,11 +65,14 @@ ARG TS3_CLIENT_VERSION=3.6.2
 RUN wget -q "https://files.teamspeak-services.com/releases/client/${TS3_CLIENT_VERSION}/TeamSpeak3-Client-linux_amd64-${TS3_CLIENT_VERSION}.run" \
     -O /tmp/ts3client.run \
     && chmod +x /tmp/ts3client.run \
-    && /tmp/ts3client.run --noexec --target /opt/ts3client \
-    && rm /tmp/ts3client.run
+    && echo "y" | /tmp/ts3client.run --noexec --target /tmp/ts3client_extract \
+    && mkdir -p /opt/ts3client \
+    && cp -r /tmp/ts3client_extract/TeamSpeak3-Client-linux_amd64/* /opt/ts3client/ \
+    && rm -rf /tmp/ts3client.run /tmp/ts3client_extract
 
 # Make TS3 client scripts executable
-RUN chmod +x /opt/ts3client/ts3client_runscript.sh 2>/dev/null || true
+RUN chmod +x /opt/ts3client/ts3client_runscript.sh && \
+    ls -la /opt/ts3client/
 
 # ── Python dependencies ──────────────────────────
 COPY requirements.txt /opt/bot/requirements.txt
