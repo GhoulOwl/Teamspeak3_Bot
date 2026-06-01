@@ -68,6 +68,9 @@ fi
 # ── Global environment for TS3 Client and Bot ──
 export DISPLAY=:99
 export PULSE_SERVER=unix:/tmp/pulse-native
+# Chromium WebEngine cannot run sandboxed as root in Docker
+export QTWEBENGINE_CHROMIUM_FLAGS="--no-sandbox --disable-gpu"
+export CHROME_FLAGS="--no-sandbox --disable-gpu"
 
 # ── Start TS3 Client ─────────────────────────────
 echo "Starting TS3 Client..."

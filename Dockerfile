@@ -65,6 +65,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dbus \
     && rm -rf /var/lib/apt/lists/*
 
+# ── OpenSSL 1.1 for TS3 Client (built against OpenSSL 1.x) ──
+# Debian Bookworm ships OpenSSL 3.x which is ABI-incompatible with 1.x.
+# Install libssl1.1 from Debian Bullseye (11) security repo.
+RUN echo "deb http://deb.debian.org/debian bullseye main" > /etc/apt/sources.list.d/bullseye.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends libssl1.1 \
+    && rm -f /etc/apt/sources.list.d/bullseye.list \
+    && rm -rf /var/lib/apt/lists/*
+
 # ── TeamSpeak 3 Client ───────────────────────────
 # The TS3 Linux client .run file must be manually downloaded and placed
 # in the project root directory before building:
