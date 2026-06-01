@@ -10,10 +10,13 @@
 - [docker/pulseaudio/default.pa](file://docker/pulseaudio/default.pa)
 - [requirements.txt](file://requirements.txt)
 - [config/config.yaml](file://config/config.yaml)
+- [.gitignore](file://.gitignore)
 </cite>
 
 ## 更新摘要
 **变更内容**
+- TeamSpeak客户端安装流程从自动下载改为手动下载，需要用户预先下载并放置TS3客户端安装包
+- 添加了详细的TS3客户端下载说明和注意事项
 - 完全移除了Supervisor进程管理依赖，采用直接bash脚本管理进程
 - 将PulseAudio配置从系统模式改为用户模式，解决了权限问题
 - 增强了TeamSpeak3客户端检测逻辑，支持多种二进制文件命名模式
@@ -41,7 +44,7 @@
 - 部署步骤、镜像构建命令与容器运行示例
 - 常见部署问题解决方案与最佳实践
 
-**更新** Dockerfile经过重大改进，完全移除了Supervisor依赖，采用直接bash脚本管理进程，改进了PulseAudio用户模式配置，增强了TeamSpeak3客户端安装过程。
+**更新** Dockerfile经过重大改进，完全移除了Supervisor依赖，采用直接bash脚本管理进程，改进了PulseAudio用户模式配置，增强了TeamSpeak3客户端安装过程。特别重要的是，TeamSpeak客户端安装流程已从自动下载改为手动下载，需要用户预先下载并放置TS3客户端安装包。
 
 ## 项目结构
 该项目采用分层组织方式，Docker相关配置集中在docker目录中，应用代码位于bot目录，配置文件位于config目录。Dockerfile负责构建镜像，docker-compose.yml负责编排单容器服务，入口脚本直接管理多进程。
@@ -53,6 +56,7 @@ Host["宿主机"]
 Volumes["命名卷<br/>ts3bot-data<br/>ts3bot-identity"]
 Env[".env环境变量文件"]
 Platform["平台架构<br/>linux/amd64"]
+TS3Installer["TS3客户端安装包<br/>TeamSpeak3-Client-linux_amd64-3.6.2.run"]
 end
 subgraph "容器: ts3bot"
 Entrypoint["/entrypoint.sh"]
@@ -69,6 +73,7 @@ end
 Host --> Volumes
 Host --> Env
 Host --> Platform
+Host --> TS3Installer
 Entrypoint --> Xvfb
 Entrypoint --> Pulse
 Pulse --> NullSink
@@ -79,12 +84,12 @@ Bot --> Config
 ```
 
 **图表来源**
-- [Dockerfile:1-132](file://Dockerfile#L1-L132)
+- [Dockerfile:1-135](file://Dockerfile#L1-L135)
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
 - [docker/entrypoint.sh:1-131](file://docker/entrypoint.sh#L1-L131)
 
 **章节来源**
-- [Dockerfile:1-132](file://Dockerfile#L1-L132)
+- [Dockerfile:1-135](file://Dockerfile#L1-L135)
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
 
 ## 核心组件
@@ -93,26 +98,31 @@ Bot --> Config
 - **增强的TS3客户端检测逻辑**：入口脚本现在包含多种TS3客户端二进制文件的查找策略，支持多种命名模式和回退机制。
 - **TS3客户端初始化脚本**：在首次运行时生成settings.db，配置音频设备使用PulseAudio的null sink，并写入自动连接书签。
 - **应用配置**：通过YAML配置文件与环境变量插值，支持TS3、音频、网易云音乐、AI聊天、自动化、调度、Webhook与日志等模块。
-- **Dockerfile**：定义基础镜像、系统依赖、Python依赖、应用代码复制、用户与权限、PulseAudio配置以及入口点。**更新** 移除了process manager依赖，简化了镜像构建过程。
+- **Dockerfile**：定义基础镜像、系统依赖、Python依赖、应用代码复制、用户与权限、PulseAudio配置以及入口点。**更新** 移除了process manager依赖，简化了镜像构建过程，实现了TS3客户端的手动下载安装。
 
 **章节来源**
 - [docker/entrypoint.sh:1-131](file://docker/entrypoint.sh#L1-L131)
 - [docker/ts3client/init_identity.py:1-92](file://docker/ts3client/init_identity.py#L1-L92)
 - [docker/pulseaudio/default.pa:1-20](file://docker/pulseaudio/default.pa#L1-L20)
 - [config/config.yaml:1-76](file://config/config.yaml#L1-L76)
-- [Dockerfile:1-132](file://Dockerfile#L1-L132)
+- [Dockerfile:1-135](file://Dockerfile#L1-L135)
 
 ## 架构总览
 容器内采用直接bash脚本管理多个子进程，确保各组件按序启动与自愈。TS3客户端通过headless模式运行，配合PulseAudio的null sink实现无显示器音频播放。Python Bot通过FastAPI提供Webhook服务（可选），并通过ServerQuery与TS3服务器交互。
 
 ```mermaid
 sequenceDiagram
+participant User as "用户"
+participant Dockerfile as "Dockerfile"
 participant Entrypoint as "入口脚本"
 participant Xvfb as "Xvfb 虚拟显示"
 participant Pulse as "PulseAudio (用户模式)"
 participant NullSink as "Null Sink"
 participant TS3 as "TS3 客户端"
 participant Bot as "Python Bot 应用"
+User->>Dockerfile : 下载TS3客户端安装包
+Dockerfile->>Dockerfile : 手动复制TS3安装包到镜像
+Dockerfile->>Dockerfile : 解析并安装TS3客户端
 Entrypoint->>Entrypoint : 创建运行时目录
 Entrypoint->>Entrypoint : 初始化TS3客户端身份
 Entrypoint->>Xvfb : 启动虚拟显示
@@ -134,13 +144,20 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 - 基础镜像与环境变量：基于python:3.12-slim-bookworm，设置非交互式前端以避免安装时的交互提示。
 - 系统包安装：安装虚拟显示（Xvfb）、音频（PulseAudio及其工具）、音视频解码（FFmpeg）、TS3客户端依赖库（Qt5、X11、SSL、DBus、GL等）、实用工具（wget、bzip2、xdotool、sqlite3）。
 - **移除的依赖**：process manager（Supervisor）已被移除，简化了镜像构建过程。**更新** 在第53行注释掉了相关依赖。
-- TeamSpeak3客户端：通过参数化版本号下载并解压到/opt/ts3client，设置运行脚本可执行权限。**更新** 使用TS3_CLIENT_VERSION参数控制版本，提供更灵活的版本管理。
-- Python依赖：复制requirements.txt并安装，确保无缓存以减小镜像体积。
+- **TeamSpeak3客户端**：**重大变更** 现在采用手动下载安装方式。用户需要先从TeamSpeak官网下载对应版本的安装包，然后将其放在项目根目录下，Dockerfile会自动复制并安装。这种方式提供了更好的版本控制和下载源控制。
+- **TS3客户端安装流程**：
+  - 用户需要下载：`wget https://files.teamspeak-services.com/releases/client/3.6.2/TeamSpeak3-Client-linux_amd64-3.6.2.run`
+  - Dockerfile会复制安装包到`/tmp/ts3client.run`
+  - 使用`--nox11`参数跳过X11检查（因为容器内有Xvfb）
+  - 解析并安装到`/opt/ts3client`
+  - 设置必要的可执行权限
+  - 删除临时文件
+- **Python依赖**：复制requirements.txt并安装，确保无缓存以减小镜像体积。
 - 应用代码复制：复制bot、config、docker目录至/opt/bot。
 - 运行时设置：创建ts3bot用户与数据目录，设置权限；复制PulseAudio配置；复制入口脚本并赋予执行权限；设置工作目录与入口点。
 
 **章节来源**
-- [Dockerfile:1-132](file://Dockerfile#L1-L132)
+- [Dockerfile:1-135](file://Dockerfile#L1-L135)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
 ### docker-compose.yml服务编排
@@ -234,6 +251,7 @@ graph LR
 Dockerfile["Dockerfile 构建镜像"] --> SysPkgs["系统包依赖"]
 Dockerfile --> PyDeps["Python依赖"]
 Dockerfile --> AppCopy["应用代码复制"]
+Dockerfile --> TS3Manual["手动TS3安装包"]
 AppCopy --> Bot["Python Bot 应用"]
 Bot --> Config["配置加载"]
 Bot --> TS3["TS3 ServerQuery"]
@@ -245,12 +263,12 @@ TS3Client --> BotProc["Python Bot 进程"]
 ```
 
 **图表来源**
-- [Dockerfile:1-132](file://Dockerfile#L1-L132)
+- [Dockerfile:1-135](file://Dockerfile#L1-L135)
 - [docker/entrypoint.sh:1-131](file://docker/entrypoint.sh#L1-L131)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
 **章节来源**
-- [Dockerfile:1-132](file://Dockerfile#L1-L132)
+- [Dockerfile:1-135](file://Dockerfile#L1-L135)
 - [docker/entrypoint.sh:1-131](file://docker/entrypoint.sh#L1-L131)
 - [requirements.txt:1-11](file://requirements.txt#L1-L11)
 
@@ -272,6 +290,7 @@ TS3Client --> BotProc["Python Bot 进程"]
   - **检查平台兼容性**：确认宿主机架构为linux/amd64，避免跨架构导致的问题。
   - **查看增强的日志**：检查/data/logs目录下的详细日志文件，包括pulseaudio.log、ts3client.log等。
   - **TS3客户端检测问题**：如果TS3客户端无法启动，检查入口脚本的二进制文件查找逻辑和调试输出。
+  - **手动安装包问题**：**新增** 确认TS3客户端安装包已正确下载并放置在项目根目录，检查Dockerfile中的COPY指令是否成功执行。
 - Webhook无法访问
   - 确认WEBHOOK_PORT映射正确，且容器内端口8080已启用。
   - 检查WEBHOOK_SECRET与配置中的secret一致。
@@ -293,8 +312,9 @@ TS3Client --> BotProc["Python Bot 进程"]
   - **进程监控**：所有进程都有独立的日志文件，便于定位具体问题
   - **用户模式音频**：PulseAudio用户模式提供了更好的容器内音频支持和资源管理
   - **增强的TS3检测**：入口脚本现在提供详细的TS3客户端二进制文件查找调试信息
+  - **手动安装包验证**：**新增** 检查/opt/ts3client目录下的TS3客户端文件完整性
 
-**更新** 新增了基于直接进程管理和用户模式音频的故障排除指南。
+**更新** 新增了基于直接进程管理和用户模式音频的故障排除指南，以及手动TS3安装包相关的故障排除步骤。
 
 **章节来源**
 - [docker/entrypoint.sh:1-131](file://docker/entrypoint.sh#L1-L131)
@@ -303,17 +323,22 @@ TS3Client --> BotProc["Python Bot 进程"]
 - [docker-compose.yml:6-10](file://docker-compose.yml#L6-L10)
 
 ## 结论
-该容器化方案通过Dockerfile精确控制系统与Python依赖，结合直接bash脚本管理多进程，实现了TS3客户端headless运行与Python Bot的稳定服务。**经过重大改进的Dockerfile完全移除了Supervisor依赖，采用直接bash脚本管理进程，改进了PulseAudio用户模式配置，增强了TeamSpeak3客户端安装过程**。docker-compose.yml提供了灵活的卷挂载与环境变量配置，新增的平台特定配置确保了在linux/amd64架构上的最佳兼容性和性能。遵循本文档的部署步骤与最佳实践，可快速完成容器化部署并解决常见问题。
+该容器化方案通过Dockerfile精确控制系统与Python依赖，结合直接bash脚本管理多进程，实现了TS3客户端headless运行与Python Bot的稳定服务。**经过重大改进的Dockerfile完全移除了Supervisor依赖，采用直接bash脚本管理进程，改进了PulseAudio用户模式配置，增强了TeamSpeak3客户端安装过程**。特别重要的是，TeamSpeak客户端安装流程已从自动下载改为手动下载，这种方式提供了更好的版本控制和下载源控制，用户可以精确选择所需的TS3客户端版本。docker-compose.yml提供了灵活的卷挂载与环境变量配置，新增的平台特定配置确保了在linux/amd64架构上的最佳兼容性和性能。遵循本文档的部署步骤与最佳实践，可快速完成容器化部署并解决常见问题。
 
-**更新** 强调Dockerfile重大改进的重要性，确保部署的稳定性和性能。
+**更新** 强调Dockerfile重大改进的重要性，特别是手动TS3客户端安装流程的优势，确保部署的稳定性和性能。
 
 ## 附录
 
 ### 部署步骤与命令示例
+- **准备TS3客户端安装包**：**重大变更** 需要手动下载并放置TS3客户端安装包
+  - 从TeamSpeak官网下载：`wget https://files.teamspeak-services.com/releases/client/3.6.2/TeamSpeak3-Client-linux_amd64-3.6.2.run`
+  - 将下载的安装包放置在项目根目录
+  - 确认文件名为：`TeamSpeak3-Client-linux_amd64-3.6.2.run`
 - 准备环境变量文件：创建.env文件，包含TS3_HOST、TS3_PASSWORD、OPENAI_API_KEY、OPENAI_API_BASE、OPENAI_MODEL、WEBHOOK_SECRET等必要变量。
 - **平台检查**：确认宿主机架构为linux/amd64，使用 `uname -m` 和 `arch` 命令验证
 - 构建镜像：
   - 使用Dockerfile在仓库根目录构建镜像，自动应用平台配置
+  - **注意**：构建过程中会自动复制并安装TS3客户端安装包
 - 运行容器：
   - 使用docker-compose启动服务，确保卷与端口映射正确。
   - **多架构构建**：如需在ARM64上构建，使用 `docker buildx build --platform linux/amd64 -t ts3bot .`
@@ -326,9 +351,10 @@ TS3Client --> BotProc["Python Bot 进程"]
   - **检查进程状态**：使用 `docker exec ts3bot ps aux` 查看进程状态
   - **进入容器调试**：使用 `docker exec -it ts3bot bash` 进入容器进行调试
   - **TS3客户端调试**：如果TS3客户端启动有问题，查看入口脚本的二进制文件查找调试输出
+  - **手动安装包验证**：**新增** 检查/opt/ts3client目录下的TS3客户端文件完整性
 
-**更新** 新增调试和监控步骤，利用改进的进程管理和日志记录功能。
+**更新** 新增了TS3客户端手动安装包准备步骤，这是本次重大变更的核心内容。
 
 **章节来源**
 - [docker-compose.yml:1-36](file://docker-compose.yml#L1-L36)
-- [Dockerfile:1-132](file://Dockerfile#L1-L132)
+- [Dockerfile:63-97](file://Dockerfile#L63-L97)

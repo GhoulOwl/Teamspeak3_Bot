@@ -105,10 +105,29 @@ fi
 if [ -n "$TS3BIN" ]; then
     echo "Found TS3 binary: $TS3BIN"
     chmod +x "$TS3BIN"
-    ./"$TS3BIN" &
+
+    # Pre-flight check: verify all shared libraries are available
+    if command -v ldd > /dev/null 2>&1; then
+        MISSING=$(ldd "./$TS3BIN" 2>/dev/null | grep "not found" || true)
+        if [ -n "$MISSING" ]; then
+            echo "ERROR: TS3 client has missing shared libraries:"
+            echo "$MISSING"
+            echo "Install the missing packages in the Dockerfile and rebuild."
+        fi
+    fi
+
+    ./"$TS3BIN" > /data/logs/ts3client.log 2>&1 &
     TS3_PID=$!
-    sleep 10
-    echo "TS3 Client started (PID: $TS3_PID)"
+    sleep 3
+
+    # Check if the process is still alive
+    if kill -0 "$TS3_PID" 2>/dev/null; then
+        echo "TS3 Client started successfully (PID: $TS3_PID)"
+    else
+        echo "ERROR: TS3 Client exited immediately. Last output:"
+        tail -20 /data/logs/ts3client.log 2>/dev/null || echo "  (no log output)"
+        echo "Bot will continue without TS3 Client (ServerQuery only mode)"
+    fi
 else
     echo "WARNING: Could not find TS3 client binary"
     echo "All files in /opt/ts3client root:"

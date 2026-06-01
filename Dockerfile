@@ -50,7 +50,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 \
     libegl1 \
     libgl1 \
-    # Process manager (removed - using direct process management)
+    # TS3 client runtime dependencies
+    libevent-2.1-7 \
     # Utilities
     wget \
     bzip2 \
