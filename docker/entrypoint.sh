@@ -6,8 +6,18 @@ echo "=== TS3 Bot Container Starting ==="
 # ── Create runtime directories ───────────────────
 mkdir -p /data/cache /data/logs
 mkdir -p /home/ts3bot/.ts3client
+# PulseAudio runtime directories
+mkdir -p /var/run/pulse
 mkdir -p /tmp/pulse-runtime
+chmod 0755 /tmp/pulse-runtime
+chmod 0755 /var/run/pulse
 export PULSE_RUNTIME_PATH=/tmp/pulse-runtime
+
+# ── Start dbus (required for PulseAudio) ──────
+echo "Starting dbus..."
+mkdir -p /run/dbus
+dbus-daemon --system --fork 2>/dev/null || echo "dbus already running or failed"
+sleep 1
 
 # ── Initialize TS3 client identity (first run) ──
 if [ ! -f /home/ts3bot/.ts3client/settings.db ]; then
@@ -22,12 +32,12 @@ XVFB_PID=$!
 sleep 1
 echo "Xvfb started (PID: $XVFB_PID)"
 
-# ── Start PulseAudio (system mode for root) ──────
+# ── Start PulseAudio (user mode, not system mode) ──────
 echo "Starting PulseAudio..."
-# Start in daemon mode with minimal config
-pulseaudio --system \
+# Use user mode (--start without --system) to avoid permission issues
+# System mode switches to 'pulse' user which can't access /tmp properly
+pulseaudio --start \
   --exit-idle-time=-1 \
-  --daemonize \
   --log-level=info \
   --log-target=file:/data/logs/pulseaudio.log 2>/dev/null || true
 sleep 2

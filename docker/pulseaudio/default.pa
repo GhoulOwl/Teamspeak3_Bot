@@ -9,7 +9,7 @@ set-default-sink ts3bot_sink
 set-default-source ts3bot_sink.monitor
 
 # Local protocol for FFmpeg and TS3 client
-load-module module-native-protocol-unix socket=/run/user/1000/pulse/native auth-anonymous=1
+load-module module-native-protocol-unix socket=/tmp/pulse-native auth-anonymous=1
 
 # Automatically move streams to the default sink
 load-module module-always-sink

@@ -90,8 +90,9 @@ class FFmpegProcess:
             cmd.append("default")
         else:
             # Linux: output to PulseAudio
-            # Use the sink name directly (PulseAudio module will route it)
-            cmd.extend(["-f", "pulse"])
+            # Set PULSE_SERVER environment for FFmpeg to connect
+            # Use the correct FFmpeg PulseAudio output format
+            cmd.extend(["-f", "pulse", "-server", "unix:/tmp/pulse-native"])
             cmd.append(f"{self._pulse_sink}")
 
         logger.info("Starting FFmpeg: %s", " ".join(cmd[:6]) + "...")

@@ -56,6 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bzip2 \
     xdotool \
     sqlite3 \
+    dbus \
     && rm -rf /var/lib/apt/lists/*
 
 # ── TeamSpeak 3 Client ───────────────────────────
@@ -87,6 +88,16 @@ RUN useradd -m -s /bin/bash ts3bot \
     && mkdir -p /data/cache /data/logs /home/ts3bot/.ts3client \
     && chown -R ts3bot:ts3bot /data /home/ts3bot \
     && chown -R ts3bot:ts3bot /opt/bot
+
+# PulseAudio config - allow root to run PulseAudio in Docker
+# Create client.conf
+RUN mkdir -p /etc/pulse \
+    && echo "default-server = unix:/tmp/pulse-native" >> /etc/pulse/client.conf \
+    && echo "autospawn = no" >> /etc/pulse/client.conf \
+    && echo "allow-root = yes" >> /etc/pulse/client.conf \
+    && echo "allow-module-loading = yes" >> /etc/pulse/daemon.conf \
+    && echo "exit-idle-time = -1" >> /etc/pulse/daemon.conf \
+    && echo "flat-volumes = no" >> /etc/pulse/daemon.conf
 
 # PulseAudio config
 COPY docker/pulseaudio/default.pa /etc/pulse/default.pa
