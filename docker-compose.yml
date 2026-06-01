@@ -3,8 +3,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
     container_name: ts3bot
     restart: unless-stopped
+    platform: linux/amd64
     env_file: .env
     volumes:
       - ./config:/opt/bot/config:ro

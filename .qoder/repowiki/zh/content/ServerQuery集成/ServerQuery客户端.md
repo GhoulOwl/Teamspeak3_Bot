@@ -14,6 +14,13 @@
 - [config.yaml](file://config/config.yaml)
 </cite>
 
+## 更新摘要
+**变更内容**
+- 更新了AsyncServerQueryClient的架构分析，重点描述基于future的异步响应处理机制
+- 新增了_pending_future属性和中央化响应缓冲区的详细说明
+- 增强了超时处理和错误传播机制的分析
+- 更新了背景任务处理的实现细节，突出改进的异步响应管理
+
 ## 目录
 1. [简介](#简介)
 2. [项目结构](#项目结构)
@@ -28,6 +35,8 @@
 
 ## 简介
 本技术文档围绕AsyncServerQueryClient展开，系统性阐述其异步连接管理、命令队列机制、后台任务处理、自动重连、连接生命周期、登录流程、虚拟服务器选择与昵称设置、命令发送与响应处理、错误处理策略、连接状态监控、超时处理与资源清理等实现细节，并提供客户端API使用示例与最佳实践。
+
+**更新** 本次更新重点关注客户端架构从简单行缓冲响应解析向基于future的异步响应处理机制的重大迁移，包括新的_pending_future属性、中央化响应缓冲区和改进的超时处理策略。
 
 ## 项目结构
 ServerQuery客户端位于bot/core/serverquery目录，配合事件分发器、协议编解码模块以及上层应用集成模块共同工作。配置由config模块加载，应用入口通过BotApplication进行组装与启动。
@@ -55,8 +64,8 @@ C --> E
 APP --> CMDS
 ```
 
-图表来源
-- [client.py:1-406](file://bot/core/serverquery/client.py#L1-L406)
+**图表来源**
+- [client.py:1-415](file://bot/core/serverquery/client.py#L1-L415)
 - [protocol.py:1-160](file://bot/core/serverquery/protocol.py#L1-L160)
 - [events.py:1-156](file://bot/core/serverquery/events.py#L1-L156)
 - [app.py:1-348](file://bot/app.py#L1-L348)
@@ -65,8 +74,8 @@ APP --> CMDS
 - [music.py:1-243](file://bot/core/commands/handlers/music.py#L1-L243)
 - [admin.py:1-75](file://bot/core/commands/handlers/admin.py#L1-L75)
 
-章节来源
-- [client.py:1-406](file://bot/core/serverquery/client.py#L1-L406)
+**章节来源**
+- [client.py:1-415](file://bot/core/serverquery/client.py#L1-L415)
 - [protocol.py:1-160](file://bot/core/serverquery/protocol.py#L1-L160)
 - [events.py:1-156](file://bot/core/serverquery/events.py#L1-L156)
 - [app.py:1-348](file://bot/app.py#L1-L348)
@@ -74,27 +83,29 @@ APP --> CMDS
 - [__main__.py:1-17](file://bot/__main__.py#L1-L17)
 
 ## 核心组件
-- AsyncServerQueryClient：异步ServerQuery客户端，负责连接建立、登录、虚拟服务器选择、昵称设置、事件注册、命令队列、后台读写与保活、自动重连与资源清理。
+- AsyncServerQueryClient：异步ServerQuery客户端，负责连接建立、登录、虚拟服务器选择、昵称设置、事件注册、命令队列、后台读写与保活、自动重连与资源清理。**新增** 基于future的异步响应处理机制，包括_pending_future属性和中央化响应缓冲区。
 - Protocol：协议编解码，包括转义/反转义、记录解析、响应解析、命令构建。
 - EventDispatcher：事件分发器，订阅/取消订阅事件，安全调用回调，解析通知行并派发事件对象。
 - BotApplication：应用入口，装配各子系统，连接ServerQuery，注册事件与命令，启动后台服务，优雅停机。
 - 配置模块：BotConfig定义配置模型，支持环境变量插值；config.yaml提供默认配置样例。
 
-章节来源
-- [client.py:27-406](file://bot/core/serverquery/client.py#L27-L406)
+**章节来源**
+- [client.py:27-415](file://bot/core/serverquery/client.py#L27-L415)
 - [protocol.py:38-160](file://bot/core/serverquery/protocol.py#L38-L160)
 - [events.py:102-156](file://bot/core/serverquery/events.py#L102-L156)
 - [app.py:27-348](file://bot/app.py#L27-L348)
 - [config.py:36-160](file://bot/config.py#L36-L160)
 
 ## 架构总览
-AsyncServerQueryClient采用“主循环+后台任务”的异步架构：
+AsyncServerQueryClient采用"主循环+后台任务"的异步架构，**重大更新** 包含基于future的异步响应处理机制：
+
 - 主循环负责连接建立与初始化（登录、use、clientupdate、whoami、事件注册）。
 - 后台任务：
-  - reader_loop：持续读取ServerQuery输出，区分notify事件与响应数据，解析并派发事件或完成等待中的Future。
-  - writer_loop：从命令队列取出命令，串行发送并等待响应，完成后回传结果或异常。
+  - reader_loop：持续读取ServerQuery输出，区分notify事件与响应数据，解析并派发事件或完成等待中的Future。**新增** 使用中央化响应缓冲区和_pending_future属性管理异步响应。
+  - writer_loop：从命令队列取出命令，串行发送并等待响应，完成后回传结果或异常。**改进** 通过Future链式转发实现精确的响应匹配。
   - keepalive_loop：周期性发送whoami维持连接活跃。
 - 自动重连：reader_loop检测断开后触发指数退避重连，成功后重启后台任务。
+- **新增** 响应处理机制：writer_loop创建_pending_future，reader_loop在收到error行时解析完整响应并完成对应Future。
 
 ```mermaid
 sequenceDiagram
@@ -112,14 +123,17 @@ Client->>Proto : login/use/clientupdate/whoami
 Client->>Events : 注册事件(server/text*)
 Reader->>Proto : 解析notify/error/data
 Reader->>Events : parse_and_emit()
+Reader->>Reader : 设置_pending_future
 Writer->>Proto : 发送命令并等待响应
+Writer->>Writer : 创建_pending_future
+Writer->>Writer : 添加done回调链式转发
 Keep->>Client : 定期send("whoami")
 Reader-->>Writer : 响应完成Future
 Reader-->>Client : 断开触发重连
 Client->>Client : _reconnect()
 ```
 
-图表来源
+**图表来源**
 - [client.py:81-198](file://bot/core/serverquery/client.py#L81-L198)
 - [client.py:201-290](file://bot/core/serverquery/client.py#L201-L290)
 - [protocol.py:95-134](file://bot/core/serverquery/protocol.py#L95-L134)
@@ -140,9 +154,13 @@ Client->>Client : _reconnect()
   - _cmd_queue：队列中每个条目为(command, Future)，writer_loop按序出队发送，收到响应后set_result或set_exception。
   - send：入队后等待Future，超时30秒；若响应非ok则抛出ServerQueryError。
   - _raw_send_and_wait：连接初始化阶段使用的低级发送等待，绕过队列，避免后台任务尚未启动。
+- **重大更新** 基于future的异步响应处理机制
+  - _pending_future：当前正在等待的响应Future，writer_loop创建，reader_loop完成。
+  - 中央化响应缓冲区：_response_buffer收集响应行，直到遇到error行才解析完整响应。
+  - Future链式转发：writer_loop为每个命令创建Future，reader_loop解析响应后通过_pending_future完成，再通过done回调转发给原始调用方。
 - 背景任务处理
   - reader_loop：读取行，遇到notify直接派发；遇到error行拼接完整响应并解析，完成pending_future；超时300秒视为心跳超时但不中断。
-  - writer_loop：串行发送，连接断开或异常时设置future异常。
+  - writer_loop：串行发送，连接断开或异常时设置future异常。**改进** 通过done回调确保Future链式转发的可靠性。
   - keepalive_loop：每240秒发送一次whoami维持连接。
 - 自动重连
   - reader_loop断开或异常后置未连接并触发_reconnect；成功后重新启动reader/writer/keepalive任务。
@@ -190,6 +208,8 @@ class AsyncServerQueryClient {
 -_keepalive_loop() void
 -_raw_send_and_wait(command) SQResponse
 -_escape(text) str
+-asyncio.Future _pending_future
+-list _response_buffer
 }
 class EventDispatcher {
 +subscribe(event_type, handler) void
@@ -207,13 +227,13 @@ AsyncServerQueryClient --> EventDispatcher : "使用"
 AsyncServerQueryClient --> SQResponse : "返回"
 ```
 
-图表来源
-- [client.py:27-406](file://bot/core/serverquery/client.py#L27-L406)
+**图表来源**
+- [client.py:27-415](file://bot/core/serverquery/client.py#L27-L415)
 - [events.py:102-156](file://bot/core/serverquery/events.py#L102-L156)
 - [protocol.py:63-74](file://bot/core/serverquery/protocol.py#L63-L74)
 
-章节来源
-- [client.py:27-406](file://bot/core/serverquery/client.py#L27-L406)
+**章节来源**
+- [client.py:27-415](file://bot/core/serverquery/client.py#L27-L415)
 - [protocol.py:95-134](file://bot/core/serverquery/protocol.py#L95-L134)
 
 ### 协议与事件模块
@@ -241,12 +261,12 @@ Resolve --> End(["结束"])
 Accumulate --> End
 ```
 
-图表来源
+**图表来源**
 - [client.py:201-254](file://bot/core/serverquery/client.py#L201-L254)
 - [events.py:139-156](file://bot/core/serverquery/events.py#L139-L156)
 - [protocol.py:95-134](file://bot/core/serverquery/protocol.py#L95-L134)
 
-章节来源
+**章节来源**
 - [protocol.py:38-160](file://bot/core/serverquery/protocol.py#L38-L160)
 - [events.py:18-156](file://bot/core/serverquery/events.py#L18-L156)
 
@@ -274,12 +294,12 @@ SQ-->>Cmd : 响应
 Cmd-->>User : 回复消息
 ```
 
-图表来源
+**图表来源**
 - [app.py:162-198](file://bot/app.py#L162-L198)
 - [music.py:20-93](file://bot/core/commands/handlers/music.py#L20-L93)
 - [client.py:342-364](file://bot/core/serverquery/client.py#L342-L364)
 
-章节来源
+**章节来源**
 - [app.py:27-348](file://bot/app.py#L27-L348)
 - [music.py:1-243](file://bot/core/commands/handlers/music.py#L1-L243)
 - [admin.py:1-75](file://bot/core/commands/handlers/admin.py#L1-L75)
@@ -301,14 +321,14 @@ App --> Cfg["BotConfig"]
 Cfg --> Yaml["config.yaml"]
 ```
 
-图表来源
+**图表来源**
 - [client.py:8-13](file://bot/core/serverquery/client.py#L8-L13)
 - [app.py:14-22](file://bot/app.py#L14-L22)
 - [config.py:136-160](file://bot/config.py#L136-L160)
-- [config.yaml:1-76](file://config/config.yaml#L1-76)
+- [config.yaml:1-76](file://config/config.yaml#L1-L76)
 
-章节来源
-- [client.py:1-406](file://bot/core/serverquery/client.py#L1-L406)
+**章节来源**
+- [client.py:1-415](file://bot/core/serverquery/client.py#L1-L415)
 - [app.py:1-348](file://bot/app.py#L1-L348)
 - [config.py:1-160](file://bot/config.py#L1-L160)
 - [config.yaml:1-76](file://config/config.yaml#L1-L76)
@@ -320,11 +340,12 @@ Cfg --> Yaml["config.yaml"]
 - 超时设置：读取超时300秒，发送等待30秒，兼顾稳定性与响应速度。
 - 事件派发：并发安全地派发事件，避免阻塞reader_loop。
 - 资源回收：stop中显式取消任务、drain退出命令、关闭连接，确保资源及时释放。
+- **新增** 基于future的异步响应处理：通过_pending_future和中央化缓冲区实现精确的响应匹配，避免响应错配问题。
 
 ## 故障排查指南
 - 连接失败
   - 检查主机/端口/凭据配置；确认ServerQuery服务可达且未被防火墙拦截。
-  - 观察日志中“Reconnecting in …”提示，确认指数退避是否正常。
+  - 观察日志中"Reconnecting in …"提示，确认指数退避是否正常。
 - 登录失败
   - 确认用户名与密码正确；检查ServerQuery权限是否允许登录。
 - 命令超时
@@ -332,18 +353,20 @@ Cfg --> Yaml["config.yaml"]
 - 事件未到达
   - 确认事件注册是否成功；检查EventDispatcher订阅列表；验证notify行格式。
 - 断线重连
-  - reader_loop检测到断线会触发重连；观察日志中的“Reconnected successfully”或异常堆栈。
+  - reader_loop检测到断线会触发重连；观察日志中的"Reconnected successfully"或异常堆栈。
 - 资源泄漏
   - 确保调用stop进行优雅停机；检查任务是否被取消、writer是否关闭。
+- **新增** 响应处理问题
+  - 检查_pending_future是否正确创建和完成；确认中央化缓冲区是否正确清空；验证Future链式转发是否正常工作。
 
-章节来源
+**章节来源**
 - [client.py:183-198](file://bot/core/serverquery/client.py#L183-L198)
 - [client.py:201-254](file://bot/core/serverquery/client.py#L201-L254)
 - [client.py:255-277](file://bot/core/serverquery/client.py#L255-L277)
 - [client.py:278-289](file://bot/core/serverquery/client.py#L278-L289)
 
 ## 结论
-AsyncServerQueryClient通过清晰的职责划分与稳健的异步架构，提供了可靠的ServerQuery通信能力。其命令队列、事件分发、保活与自动重连机制共同保障了在复杂场景下的稳定性与可维护性。结合BotApplication的装配与命令体系，可快速构建功能丰富的机器人应用。
+AsyncServerQueryClient通过清晰的职责划分与稳健的异步架构，提供了可靠的ServerQuery通信能力。**重大更新** 其基于future的异步响应处理机制、中央化响应缓冲区和改进的超时处理策略，显著提升了响应处理的准确性和可靠性。命令队列、事件分发、保活与自动重连机制共同保障了在复杂场景下的稳定性与可维护性。结合BotApplication的装配与命令体系，可快速构建功能丰富的机器人应用。
 
 ## 附录：API使用与最佳实践
 
@@ -352,7 +375,7 @@ AsyncServerQueryClient通过清晰的职责划分与稳健的异步架构，提�
 - 启动：调用start()完成连接、登录、use、clientupdate、whoami与事件注册。
 - 停止：调用stop()优雅关闭，取消后台任务、发送quit、关闭连接。
 
-章节来源
+**章节来源**
 - [client.py:81-149](file://bot/core/serverquery/client.py#L81-L149)
 - [app.py:283-301](file://bot/app.py#L283-L301)
 - [config.py:36-46](file://bot/config.py#L36-L46)
@@ -361,8 +384,9 @@ AsyncServerQueryClient通过清晰的职责划分与稳健的异步架构，提�
 - send(command)：命令入队，等待Future，超时30秒；响应非ok时抛出ServerQueryError。
 - build_command + ts3_escape：参数自动转义，避免协议错误。
 - 响应解析：parse_response将多行响应转换为SQResponse对象，包含data与error信息。
+- **新增** 基于future的响应处理：writer_loop创建PendingFuture，reader_loop解析完整响应后完成对应Future，确保响应与请求的精确匹配。
 
-章节来源
+**章节来源**
 - [client.py:327-340](file://bot/core/serverquery/client.py#L327-L340)
 - [protocol.py:137-160](file://bot/core/serverquery/protocol.py#L137-L160)
 - [protocol.py:95-134](file://bot/core/serverquery/protocol.py#L95-L134)
@@ -372,15 +396,16 @@ AsyncServerQueryClient通过清晰的职责划分与稳健的异步架构，提�
 - 解析与派发：parse_and_emit(line)解析notify行并并发派发事件。
 - 常见事件：textmessage、server、textserver、textchannel、textprivate。
 
-章节来源
+**章节来源**
 - [events.py:102-156](file://bot/core/serverquery/events.py#L102-L156)
 - [client.py:151-164](file://bot/core/serverquery/client.py#L151-L164)
 
 ### 超时与重连策略
 - 读取超时：300秒，用于心跳；发送等待：30秒；初始化读取：30秒。
 - 重连：指数退避，最大延迟60秒；断线后自动触发。
+- **新增** 基于future的超时处理：通过Future的done回调和异常传播机制，确保超时和错误能够正确传递给调用方。
 
-章节来源
+**章节来源**
 - [client.py:209-212](file://bot/core/serverquery/client.py#L209-L212)
 - [client.py:282-287](file://bot/core/serverquery/client.py#L282-L287)
 - [client.py:183-198](file://bot/core/serverquery/client.py#L183-L198)
@@ -389,7 +414,7 @@ AsyncServerQueryClient通过清晰的职责划分与稳健的异步架构，提�
 - stop中取消任务、drain退出命令、关闭writer、清空状态。
 - 应用层stop中依次关闭Webhook、调度器、音频、网络服务与ServerQuery。
 
-章节来源
+**章节来源**
 - [client.py:87-109](file://bot/core/serverquery/client.py#L87-L109)
 - [app.py:303-331](file://bot/app.py#L303-L331)
 
@@ -403,8 +428,8 @@ AsyncServerQueryClient通过清晰的职责划分与稳健的异步架构，提�
 - 当前信息：whoami()。
 - 戳一戳：poke(clid, message)。
 
-章节来源
-- [client.py:356-406](file://bot/core/serverquery/client.py#L356-L406)
+**章节来源**
+- [client.py:356-415](file://bot/core/serverquery/client.py#L356-L415)
 
 ### 最佳实践
 - 命令发送：优先使用send(command)保证串行化与超时控制。
@@ -413,3 +438,4 @@ AsyncServerQueryClient通过清晰的职责划分与稳健的异步架构，提�
 - 重连与超时：根据网络状况调整超时时间，合理利用keepalive。
 - 资源管理：始终调用stop进行优雅停机，确保任务与连接被正确回收。
 - 配置管理：通过config.yaml与环境变量统一管理敏感信息与运行参数。
+- **新增** 基于future的响应处理：理解_pending_future的作用机制，确保Future链式转发的正确性；在高并发场景下注意避免Future堆积导致的内存占用问题。
