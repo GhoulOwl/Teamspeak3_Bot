@@ -20,13 +20,16 @@ dbus-daemon --system --fork 2>/dev/null || echo "dbus already running or failed"
 sleep 1
 
 # ── Initialize TS3 client identity (first run) ──
-if [ ! -f /home/ts3bot/.ts3client/settings.db ]; then
-    echo "Initializing TS3 client identity..."
+# IMPORTANT: Run as ts3bot user so settings.db is created at
+# /home/ts3bot/.ts3client/ (NOT /root/.ts3client/ which the client
+# would use if running as root, causing it to ignore our pre-configured
+# audio settings, bookmarks, and license acceptance).
+echo "Initializing TS3 client settings (as ts3bot user)..."
+runuser -u ts3bot -- env \
+    TS3_HOST="${TS3_HOST:-}" \
+    TS3_VOICE_PORT="${TS3_VOICE_PORT:-9987}" \
+    TS3_NICKNAME="${TS3_NICKNAME:-MusicBot}" \
     python3 /opt/bot/docker/ts3client/init_identity.py || echo "Identity init skipped (will use defaults)"
-else
-    echo "Settings database exists, checking identity..."
-    python3 /opt/bot/docker/ts3client/init_identity.py || true
-fi
 
 # ── Start Xvfb (Virtual Display) ─────────────────
 echo "Starting Xvfb..."
@@ -140,33 +143,106 @@ if [ -n "$TS3BIN" ]; then
     fi
 
     # Build the ts3:// connection URL to force auto-connect on startup.
-    # Without this, the TS3 client starts but does NOT connect to any server,
-    # because bookmarks are only a GUI convenience and don't trigger auto-connect
-    # in headless mode.
     TS3_HOST="${TS3_HOST:-localhost}"
     TS3_VOICE_PORT="${TS3_VOICE_PORT:-9987}"
     TS3_NICKNAME="${TS3_NICKNAME:-MusicBot}"
     CONNECT_URL="ts3://${TS3_HOST}:${TS3_VOICE_PORT}?nickname=${TS3_NICKNAME}"
     echo "TS3 connection URL: $CONNECT_URL"
 
-    # Launch TS3 client with the connection URL
-    # QT_DEBUG_PLUGINS=1 helps diagnose xcb/platform plugin issues
-    QT_DEBUG_PLUGINS=1 ./"$TS3BIN" "$CONNECT_URL" > /data/logs/ts3client.log 2>&1 &
-    TS3_PID=$!
-    echo "TS3 Client launching (PID: $TS3_PID)..."
+    # Verify settings.db is in the correct location (ts3bot's home, NOT root's)
+    echo "Checking settings.db location..."
+    if [ -f /home/ts3bot/.ts3client/settings.db ]; then
+        echo "  settings.db found at /home/ts3bot/.ts3client/settings.db (correct)"
+        echo "  Key settings:"
+        sqlite3 /home/ts3bot/.ts3client/settings.db \
+            "SELECT key, value FROM settings WHERE key IN ('license/accepted_version','capture/device','playback/device','gui/eula_accepted');" \
+            2>/dev/null || echo "  (could not query settings)"
+        echo "  Bookmarks:"
+        sqlite3 /home/ts3bot/.ts3client/settings.db \
+            "SELECT name, address, port, auto_connect FROM bookmarks;" \
+            2>/dev/null || echo "  (no bookmarks)"
+    else
+        echo "  WARNING: settings.db NOT found at /home/ts3bot/.ts3client/"
+        ls -la /home/ts3bot/.ts3client/ 2>/dev/null || echo "  (directory does not exist)"
+    fi
 
-    # Wait longer for TS3 client to initialize, load identity, and connect
+    # Prepare XDG_RUNTIME_DIR for ts3bot user
+    mkdir -p /tmp/runtime-ts3bot
+    chmod 700 /tmp/runtime-ts3bot
+    chown ts3bot:ts3bot /tmp/runtime-ts3bot
+
+    # Launch TS3 client as ts3bot user (NOT root!).
+    # Running as ts3bot ensures the client reads/writes to
+    # /home/ts3bot/.ts3client/ where our pre-configured audio settings,
+    # bookmarks, and license acceptance are stored.
+    # Running as root would use /root/.ts3client/ (wrong, empty config).
+    runuser -u ts3bot -- env \
+        DISPLAY="$DISPLAY" \
+        PULSE_SERVER="$PULSE_SERVER" \
+        PULSE_RUNTIME_PATH="$PULSE_RUNTIME_PATH" \
+        XDG_RUNTIME_DIR="/tmp/runtime-ts3bot" \
+        HOME="/home/ts3bot" \
+        QT_DEBUG_PLUGINS=1 \
+        /opt/ts3client/"$TS3BIN" "$CONNECT_URL" > /data/logs/ts3client.log 2>&1 &
+    TS3_PID=$!
+    echo "TS3 Client launching as ts3bot user (PID: $TS3_PID)..."
+
+    # Give the client a moment to initialize
     sleep 5
+
+    # Fallback: If the license dialog is still blocking despite our
+    # settings-based pre-acceptance, use xdotool to auto-dismiss it.
+    echo "Checking for blocking license dialog..."
+    DIALOG_FOUND=0
+    for attempt in 1 2 3 4 5; do
+        # Search for license/EULA/agreement dialogs
+        WINDOW=$(xdotool search --name -i "license\|eula\|agreement" 2>/dev/null | head -1 || true)
+        if [ -n "$WINDOW" ]; then
+            DIALOG_FOUND=1
+            echo "  License dialog detected (attempt $attempt, window: $WINDOW)"
+            echo "  Sending Enter key to accept..."
+            xdotool windowactivate --sync "$WINDOW" 2>/dev/null
+            sleep 0.3
+            xdotool key Return 2>/dev/null || true
+            sleep 2
+        else
+            if [ "$DIALOG_FOUND" = "1" ]; then
+                echo "  License dialog dismissed."
+            else
+                echo "  No license dialog detected."
+            fi
+            break
+        fi
+    done
+
+    # Also try clicking any visible Accept/OK button globally
+    for btn_text in "Accept" "I Accept" "OK" "Agree" "I Agree"; do
+        BUTTON_WIN=$(xdotool search --name "$btn_text" 2>/dev/null | head -1 || true)
+        if [ -n "$BUTTON_WIN" ]; then
+            echo "  Found '$btn_text' button (window: $BUTTON_WIN), clicking..."
+            xdotool windowactivate --sync "$BUTTON_WIN" 2>/dev/null
+            xdotool key Return 2>/dev/null || true
+            sleep 1
+        fi
+    done
+
+    # Wait for TS3 client to finish connecting
+    echo "Waiting for TS3 client connection..."
+    sleep 10
 
     # Check if the process is still alive
     if kill -0 "$TS3_PID" 2>/dev/null; then
         echo "TS3 Client is running (PID: $TS3_PID)"
-        # Show recent log output for diagnostics
-        echo "--- TS3 Client log (last 10 lines) ---"
-        tail -10 /data/logs/ts3client.log 2>/dev/null || echo "  (no log output yet)"
+        echo "--- TS3 Client log (connection-related) ---"
+        grep -iE "connect|identity|server|channel|login|error|fail|reject|license" /data/logs/ts3client.log 2>/dev/null | tail -30 || echo "  (no connection-related lines)"
+        echo "--- Last 30 lines ---"
+        tail -30 /data/logs/ts3client.log 2>/dev/null || echo "  (no log output yet)"
         echo "--- End of TS3 Client log ---"
     else
-        echo "ERROR: TS3 Client exited immediately. Full output:"
+        wait "$TS3_PID" 2>/dev/null
+        EXIT_CODE=$?
+        echo "ERROR: TS3 Client exited with code: $EXIT_CODE"
+        echo "Full output:"
         cat /data/logs/ts3client.log 2>/dev/null || echo "  (no log output)"
         echo ""
         echo "Bot will continue without TS3 Client (ServerQuery only mode)"
