@@ -16,19 +16,38 @@ def _generate_identity_via_openssl() -> str | None:
 
     Returns PEM-encoded key string, or None on failure.
     """
-    try:
-        result = subprocess.run(
-            ["openssl", "genrsa", "2048"],
-            capture_output=True,
-            timeout=10,
-        )
-        if result.returncode == 0 and b"BEGIN RSA PRIVATE KEY" in result.stdout:
-            return result.stdout.decode("ascii")
-        print("openssl genrsa returned non-zero or unexpected output", file=sys.stderr)
-    except FileNotFoundError:
-        print("openssl not found, skipping identity generation", file=sys.stderr)
-    except subprocess.TimeoutExpired:
-        print("openssl genrsa timed out", file=sys.stderr)
+    # Try multiple openssl commands in order of preference
+    commands = [
+        ["openssl", "genrsa", "2048"],
+        ["openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048"],
+        ["openssl", "genrsa", "-outform", "PEM", "2048"],
+    ]
+
+    for cmd in commands:
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                timeout=15,
+            )
+            # Print diagnostic info
+            print(f"  [{cmd[1]}] rc={result.returncode}, "
+                  f"stdout={len(result.stdout)}B, stderr={result.stderr[:200] if result.stderr else 'none'}")
+
+            if result.returncode == 0 and result.stdout:
+                pem = result.stdout.decode("ascii", errors="replace")
+                if "BEGIN" in pem and "PRIVATE KEY" in pem:
+                    print(f"  Key generated via: {' '.join(cmd)}")
+                    return pem
+
+        except FileNotFoundError:
+            print(f"  openssl not found in PATH", file=sys.stderr)
+            break  # No point trying more openssl commands
+        except subprocess.TimeoutExpired:
+            print(f"  [{' '.join(cmd)}] timed out", file=sys.stderr)
+            continue
+
+    print("  WARNING: All openssl key generation attempts failed.", file=sys.stderr)
     return None
 
 
