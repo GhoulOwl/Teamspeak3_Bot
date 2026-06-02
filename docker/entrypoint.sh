@@ -192,38 +192,80 @@ if [ -n "$TS3BIN" ]; then
 
     # Fallback: If the license dialog is still blocking despite our
     # settings-based pre-acceptance, use xdotool to auto-dismiss it.
+    # IMPORTANT: The TS3 license dialog requires scrolling the license
+    # text to the bottom before the "Agree" button becomes clickable.
+    # Simply pressing Enter won't work because the button is disabled.
     echo "Checking for blocking license dialog..."
-    DIALOG_FOUND=0
-    for attempt in 1 2 3 4 5; do
-        # Search for license/EULA/agreement dialogs
-        WINDOW=$(xdotool search --name -i "license\|eula\|agreement" 2>/dev/null | head -1 || true)
-        if [ -n "$WINDOW" ]; then
-            DIALOG_FOUND=1
-            echo "  License dialog detected (attempt $attempt, window: $WINDOW)"
-            echo "  Sending Enter key to accept..."
-            xdotool windowactivate --sync "$WINDOW" 2>/dev/null
-            sleep 0.3
-            xdotool key Return 2>/dev/null || true
-            sleep 2
-        else
-            if [ "$DIALOG_FOUND" = "1" ]; then
-                echo "  License dialog dismissed."
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        WINDOW=$(xdotool search --name "License" 2>/dev/null | head -1 || true)
+        if [ -z "$WINDOW" ]; then
+            if [ "$attempt" -gt 1 ]; then
+                echo "  License dialog dismissed after attempt $((attempt-1))."
             else
                 echo "  No license dialog detected."
             fi
             break
         fi
-    done
 
-    # Also try clicking any visible Accept/OK button globally
-    for btn_text in "Accept" "I Accept" "OK" "Agree" "I Agree"; do
-        BUTTON_WIN=$(xdotool search --name "$btn_text" 2>/dev/null | head -1 || true)
-        if [ -n "$BUTTON_WIN" ]; then
-            echo "  Found '$btn_text' button (window: $BUTTON_WIN), clicking..."
-            xdotool windowactivate --sync "$BUTTON_WIN" 2>/dev/null
+        echo "  License dialog detected (attempt $attempt, window: $WINDOW)"
+
+        # Activate and focus the dialog
+        xdotool windowactivate --sync "$WINDOW" 2>/dev/null || true
+        sleep 0.3
+
+        # Scroll the license text to the bottom to enable the Agree button.
+        # Use End key (jumps to end of text) and repeated Page Down as fallback.
+        xdotool key End 2>/dev/null || true
+        sleep 0.2
+        for i in $(seq 1 30); do
+            xdotool key Page_Down 2>/dev/null || true
+        done
+        sleep 0.3
+        # Also try mouse wheel scroll down inside the dialog
+        GEO=$(xdotool getwindowgeometry --shell "$WINDOW" 2>/dev/null)
+        eval "$GEO"
+        CX=$((WIDTH / 2))
+        CY=$((HEIGHT / 2))
+        xdotool mousemove --window "$WINDOW" "$CX" "$CY" 2>/dev/null || true
+        for i in $(seq 1 50); do
+            xdotool click 5 2>/dev/null || true  # scroll wheel down
+        done
+        sleep 0.5
+
+        # Now click the Agree button.
+        # Strategy 1: Look for a child window named "Agree"
+        AGREE_WIN=$(xdotool search --onlyvisible --name "Agree" 2>/dev/null | head -1 || true)
+        if [ -n "$AGREE_WIN" ]; then
+            echo "  Found Agree button window ($AGREE_WIN), clicking..."
+            xdotool windowactivate --sync "$AGREE_WIN" 2>/dev/null || true
+            sleep 0.2
             xdotool key Return 2>/dev/null || true
-            sleep 1
         fi
+
+        # Strategy 2: Click at estimated button position (bottom-right area)
+        echo "  Clicking at estimated Agree button position..."
+        BTN_X=$((WIDTH - 100))
+        BTN_Y=$((HEIGHT - 35))
+        xdotool mousemove --window "$WINDOW" "$BTN_X" "$BTN_Y" 2>/dev/null || true
+        xdotool click 1 2>/dev/null || true
+        sleep 0.3
+
+        # Strategy 3: Tab to the button and press Enter
+        xdotool windowactivate --sync "$WINDOW" 2>/dev/null || true
+        for i in $(seq 1 5); do
+            xdotool key Tab 2>/dev/null || true
+        done
+        sleep 0.2
+        xdotool key Return 2>/dev/null || true
+
+        sleep 2
+
+        # Check if dialog is gone
+        if ! xdotool search --name "License" > /dev/null 2>&1; then
+            echo "  License dialog dismissed!"
+            break
+        fi
+        echo "  Dialog still present, retrying..."
     done
 
     # Wait for TS3 client to finish connecting
