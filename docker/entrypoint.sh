@@ -197,139 +197,34 @@ if [ -n "$TS3BIN" ]; then
     TS3_PID=$!
     echo "TS3 Client launching as ts3bot user (PID: $TS3_PID)..."
 
-    # Give the client a moment to initialize
-    sleep 5
+    # CRITICAL: Connect via ClientQuery IMMEDIATELY while the port is open.
+    # The ClientQuery port (25639) opens within the first ~3 seconds.
+    # xdotool license dialog dismissal causes the TS3 client to exit,
+    # so we must connect BEFORE any xdotool events are sent.
+    echo "Connecting via ClientQuery..."
+    python3 - "$TS3_HOST" "$TS3_VOICE_PORT" "$TS3_NICKNAME" <<'PYEOF'
+import socket, sys, time, os
 
-    # Fallback: If the license dialog is still blocking despite our
-    # settings-based pre-acceptance, use xdotool to auto-dismiss it.
-    # IMPORTANT: The TS3 license dialog requires scrolling the license
-    # text to the bottom before the "Agree" button becomes clickable.
-    # Openbox WM is required for xdotool windowactivate to work.
-    # CRITICAL: After each xdotool action, check if dialog is gone to
-    # prevent stray events from reaching the main TS3 window.
-    echo "Checking for blocking license dialog..."
-
-    # Helper: returns 0 if license dialog is still present
-    license_dialog_present() {
-        xdotool search --name "License" > /dev/null 2>&1
-    }
-
-    for attempt in 1 2 3 4 5 6 7 8 9 10; do
-        WINDOW=$(xdotool search --name "License" 2>/dev/null | head -1 || true)
-        if [ -z "$WINDOW" ]; then
-            if [ "$attempt" -gt 1 ]; then
-                echo "  License dialog dismissed after attempt $((attempt-1))."
-            else
-                echo "  No license dialog detected."
-            fi
-            break
-        fi
-
-        echo "  License dialog detected (attempt $attempt, window: $WINDOW)"
-
-        # Get dialog geometry
-        GEO=$(xdotool getwindowgeometry --shell "$WINDOW" 2>/dev/null)
-        eval "$GEO"
-        W=${WIDTH:-740}
-        H=${HEIGHT:-700}
-        echo "  Dialog size: ${W}x${H}"
-
-        # Activate the dialog
-        xdotool windowactivate --sync "$WINDOW" 2>/dev/null || true
-        sleep 0.3
-
-        # Step 1: Click center to focus the text area
-        CX=$((W / 2))
-        CY=$((H / 2))
-        xdotool mousemove --window "$WINDOW" "$CX" "$CY" 2>/dev/null || true
-        xdotool click 1 2>/dev/null || true
-        sleep 0.3
-        license_dialog_present || { echo "  License dialog dismissed!"; break; }
-
-        # Step 2: Scroll to bottom incrementally, checking after each batch
-        echo "  Scrolling license text to bottom..."
-        xdotool key End 2>/dev/null || true
-        sleep 0.3
-        license_dialog_present || { echo "  License dialog dismissed!"; break; }
-
-        for batch in 1 2 3 4; do
-            for i in $(seq 1 15); do
-                xdotool key Page_Down 2>/dev/null || true
-            done
-            sleep 0.3
-            license_dialog_present || { echo "  License dialog dismissed during scroll!"; break 2; }
-        done
-
-        # Mouse wheel scroll
-        xdotool mousemove --window "$WINDOW" "$CX" "$CY" 2>/dev/null || true
-        for batch in 1 2 3 4; do
-            for i in $(seq 1 20); do
-                xdotool click 5 2>/dev/null || true
-            done
-            sleep 0.3
-            license_dialog_present || { echo "  License dialog dismissed during scroll!"; break 2; }
-        done
-
-        # Step 3: Click Agree button (bottom-right area)
-        echo "  Clicking Agree button..."
-        BTN_X=$((W - 80))
-        BTN_Y=$((H - 30))
-        xdotool mousemove --window "$WINDOW" "$BTN_X" "$BTN_Y" 2>/dev/null || true
-        xdotool click 1 2>/dev/null || true
-        sleep 1
-        license_dialog_present || { echo "  License dialog dismissed by Agree click!"; break; }
-
-        # Step 4: Tab + Enter as backup
-        xdotool windowactivate --sync "$WINDOW" 2>/dev/null || true
-        for i in $(seq 1 5); do
-            xdotool key Tab 2>/dev/null || true
-            sleep 0.1
-        done
-        xdotool key Return 2>/dev/null || true
-        sleep 2
-        license_dialog_present || { echo "  License dialog dismissed by Tab+Enter!"; break; }
-
-        # Step 5: Grid click brute force
-        echo "  Dialog still present, trying grid click..."
-        DISMISSED=0
-        for bx in $((W-60)) $((W-100)) $((W-140)) $((W-180)); do
-            for by in $((H-25)) $((H-40)) $((H-55)) $((H-70)); do
-                xdotool mousemove --window "$WINDOW" "$bx" "$by" 2>/dev/null || true
-                xdotool click 1 2>/dev/null || true
-                sleep 0.3
-                if ! license_dialog_present; then
-                    echo "  Dismissed by clicking at ($bx, $by)!"
-                    DISMISSED=1
-                    break 2
-                fi
-            done
-        done
-        [ "$DISMISSED" = "1" ] && break
-
-        echo "  WARNING: Could not dismiss license dialog on attempt $attempt"
-    done
-
-    # After dismissing license dialog, connect via ClientQuery
-    if xdotool search --name "License" > /dev/null 2>&1; then
-        echo "WARNING: License dialog could not be dismissed after all attempts"
-    else
-        echo "License dialog handled. Connecting via ClientQuery..."
-        sleep 2
-
-        # Read the ClientQuery API key from config
-        CQ_API_KEY=$(grep 'api_key=' /home/ts3bot/.ts3client/clientquery.ini 2>/dev/null | head -1 | cut -d'=' -f2)
-        if [ -z "$CQ_API_KEY" ]; then
-            echo "WARNING: Could not read ClientQuery API key"
-        fi
-
-        # Wait for ClientQuery port to become available, then connect
-        python3 - "$TS3_HOST" "$TS3_VOICE_PORT" "$TS3_NICKNAME" "$CQ_API_KEY" <<'PYEOF'
-import socket, sys, time
-
-host, port, nickname, api_key = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+host, port, nickname = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 connected = False
+api_key = ""
 
-for attempt in range(20):
+# Wait for clientquery.ini and read API key
+for _ in range(15):
+    ini_path = "/home/ts3bot/.ts3client/clientquery.ini"
+    if os.path.exists(ini_path):
+        with open(ini_path) as f:
+            for line in f:
+                if line.startswith("api_key="):
+                    api_key = line.split("=", 1)[1].strip()
+                    break
+        if api_key:
+            break
+    time.sleep(1)
+if not api_key:
+    print("  WARNING: Could not read ClientQuery API key")
+
+for attempt in range(25):
     if attempt > 0:
         time.sleep(1)
     try:
@@ -338,30 +233,41 @@ for attempt in range(20):
         sock.connect(("127.0.0.1", 25639))
         time.sleep(0.3)
         welcome = sock.recv(4096).decode(errors="replace").strip()
-        if "TS3 Client connected" not in welcome and "welcome" not in welcome.lower():
-            # Might need more time
+        if "TS3 Client" not in welcome and "Welcome" not in welcome:
             sock.close()
             continue
-        print(f"  ClientQuery ready: {welcome}")
+        print(f"  ClientQuery ready: {welcome[:60]}")
 
-        # Authenticate
         if api_key:
             sock.sendall(f"auth apikey={api_key}\n".encode())
             time.sleep(0.5)
             resp = sock.recv(4096).decode(errors="replace").strip()
-            print(f"  Auth response: {resp}")
+            print(f"  Auth: {resp}")
 
-        # Connect to server (ClientQuery uses 'address' not 'ip')
-        sock.sendall(f"connect address={host}:{port} nickname={nickname}\n".encode())
-        time.sleep(5)
-        resp = sock.recv(4096).decode(errors="replace").strip()
-        print(f"  Connect response: {resp}")
-        if "error" in resp.lower():
-            print(f"  WARNING: Connection may have failed")
-        else:
-            connected = True
-            print(f"  Connected to {host}:{port} as {nickname}")
+        cmd = f"connect address={host}:{port} nickname={nickname}\n"
+        print(f"  Sending: {cmd.strip()}")
+        sock.sendall(cmd.encode())
 
+        sock.settimeout(2)
+        end_time = time.time() + 15
+        while time.time() < end_time:
+            try:
+                data = sock.recv(4096).decode(errors="replace").strip()
+                if data:
+                    print(f"  Response: {data}")
+            except socket.timeout:
+                break
+
+        sock.settimeout(5)
+        sock.sendall(b"whoami\n")
+        time.sleep(2)
+        try:
+            resp = sock.recv(4096).decode(errors="replace").strip()
+            print(f"  Whoami: {resp}")
+            if "not connected" not in resp and "error" not in resp.lower():
+                connected = True
+        except socket.timeout:
+            print("  Whoami: timeout (connection may be in progress)")
         sock.close()
         break
     except (ConnectionRefusedError, OSError):
@@ -373,28 +279,80 @@ for attempt in range(20):
         break
 
 if not connected:
-    print("  WARNING: Could not connect via ClientQuery")
-    print("  The TS3 client may still connect via auto-connect bookmark")
+    print("  ClientQuery connection attempt completed")
 PYEOF
-        sleep 3
-    fi
+    echo "ClientQuery connection attempt finished."
 
-    # Verify TS3 client is still running and connected
+    # Now dismiss the license dialog (if still present).
+    # The connection is already in progress via ClientQuery.
+    echo "Checking for blocking license dialog..."
+    license_dialog_present() {
+        xdotool search --name "License" > /dev/null 2>&1
+    }
+
+    for attempt in 1 2 3; do
+        WINDOW=$(xdotool search --name "License" 2>/dev/null | head -1 || true)
+        if [ -z "$WINDOW" ]; then
+            echo "  No license dialog detected."
+            break
+        fi
+        echo "  License dialog detected (attempt $attempt, window: $WINDOW)"
+        GEO=$(xdotool getwindowgeometry --shell "$WINDOW" 2>/dev/null)
+        eval "$GEO"
+        W=${WIDTH:-740}; H=${HEIGHT:-700}
+        xdotool windowactivate --sync "$WINDOW" 2>/dev/null || true
+        sleep 0.3
+        CX=$((W / 2)); CY=$((H / 2))
+        xdotool mousemove --window "$WINDOW" "$CX" "$CY" 2>/dev/null || true
+        xdotool click 1 2>/dev/null || true
+        sleep 0.3
+        license_dialog_present || { echo "  License dialog dismissed!"; break; }
+
+        echo "  Scrolling license text to bottom..."
+        xdotool key End 2>/dev/null || true
+        sleep 0.3
+        license_dialog_present || { echo "  License dialog dismissed!"; break; }
+        for batch in 1 2 3 4; do
+            for i in $(seq 1 15); do xdotool key Page_Down 2>/dev/null || true; done
+            sleep 0.3
+            license_dialog_present || { echo "  Dismissed during scroll!"; break 2; }
+        done
+        xdotool mousemove --window "$WINDOW" "$CX" "$CY" 2>/dev/null || true
+        for batch in 1 2 3 4; do
+            for i in $(seq 1 20); do xdotool click 5 2>/dev/null || true; done
+            sleep 0.3
+            license_dialog_present || { echo "  Dismissed during scroll!"; break 2; }
+        done
+
+        echo "  Clicking Agree button..."
+        BTN_X=$((W - 80)); BTN_Y=$((H - 30))
+        xdotool mousemove --window "$WINDOW" "$BTN_X" "$BTN_Y" 2>/dev/null || true
+        xdotool click 1 2>/dev/null || true
+        sleep 1
+        license_dialog_present || { echo "  Dismissed by Agree click!"; break; }
+
+        xdotool windowactivate --sync "$WINDOW" 2>/dev/null || true
+        for i in $(seq 1 5); do xdotool key Tab 2>/dev/null || true; sleep 0.1; done
+        xdotool key Return 2>/dev/null || true
+        sleep 2
+        license_dialog_present || { echo "  Dismissed by Tab+Enter!"; break; }
+        echo "  WARNING: Could not dismiss license dialog on attempt $attempt"
+    done
+
+    # Wait for connection to stabilize
+    sleep 5
+
+    # Verify TS3 client status
     echo "Checking TS3 client status..."
     if kill -0 "$TS3_PID" 2>/dev/null; then
         echo "TS3 Client is running (PID: $TS3_PID)"
-        echo "--- TS3 Client log (connection-related) ---"
-        grep -iE "connect|identity|server|channel|login|error|fail|reject" /data/logs/ts3client.log 2>/dev/null | tail -20 || echo "  (no connection-related lines)"
-        echo "--- Last 20 lines ---"
-        tail -20 /data/logs/ts3client.log 2>/dev/null || echo "  (no log output yet)"
-        echo "--- End of TS3 Client log ---"
+        grep -iE "connect|identity|server|channel" /data/logs/ts3client.log 2>/dev/null | tail -10 || true
+        tail -10 /data/logs/ts3client.log 2>/dev/null || true
     else
         wait "$TS3_PID" 2>/dev/null
         EXIT_CODE=$?
         echo "ERROR: TS3 Client exited with code: $EXIT_CODE"
-        echo "Full output:"
-        cat /data/logs/ts3client.log 2>/dev/null || echo "  (no log output)"
-        echo ""
+        tail -30 /data/logs/ts3client.log 2>/dev/null || echo "  (no log output)"
         echo "Bot will continue without TS3 Client (ServerQuery only mode)"
         echo "Audio playback to TS3 channels will NOT work."
     fi
