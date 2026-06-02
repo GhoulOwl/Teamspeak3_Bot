@@ -67,6 +67,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dbus \
     openssl \
     file \
+    iptables \
     && rm -rf /var/lib/apt/lists/*
 
 # ── OpenSSL 1.1 for TS3 Client (built against OpenSSL 1.x) ──

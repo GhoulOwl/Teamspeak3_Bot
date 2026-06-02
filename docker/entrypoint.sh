@@ -122,6 +122,25 @@ else
     cat /data/logs/pulseaudio.log 2>/dev/null || echo "No log file"
 fi
 
+# ── Block outbound HTTP/HTTPS for TS3 client user (ts3bot, UID 1000) ──
+# The TS3 client makes HTTPS requests to TeamSpeak servers for:
+#   - License updates (triggers blocking modal dialog)
+#   - Remote images like avatars/icons (failures cause disconnect)
+#   - myTeamSpeak addon/sync services (unnecessary for headless bot)
+# We block these at the iptables level using UID-based rules so that:
+#   - The TS3 client (ts3bot UID) cannot make outbound HTTP/HTTPS
+#   - The Python bot (root UID) retains full HTTP/HTTPS access for
+#     OpenAI API, Netease API, yt-dlp downloads, etc.
+#   - UDP voice traffic is unaffected (only TCP 80/443 are blocked)
+# Requires NET_ADMIN capability in docker-compose.yml.
+echo "Setting iptables rules to block TS3 client outbound HTTP/HTTPS..."
+TS3BOT_UID=1000
+# Block outbound HTTP (80) and HTTPS (443) for ts3bot user
+iptables -A OUTPUT -p tcp --dport 80 -m owner --uid-owner $TS3BOT_UID -j DROP 2>/dev/null && \
+iptables -A OUTPUT -p tcp --dport 443 -m owner --uid-owner $TS3BOT_UID -j DROP 2>/dev/null && \
+echo "  iptables rules applied: ts3bot user blocked from outbound TCP 80/443" || \
+echo "  WARNING: iptables rules failed (need cap_add: NET_ADMIN in docker-compose.yml)"
+
 # ── Global environment for TS3 Client and Bot ──
 export DISPLAY=:99
 # Chromium WebEngine cannot run sandboxed as root in Docker

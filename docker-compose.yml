@@ -31,6 +31,8 @@ services:
       - /run/shm:size=50m
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    cap_add:
+      - NET_ADMIN
 
 volumes:
   ts3bot-data:
