@@ -152,8 +152,12 @@ if [ -n "$TS3BIN" ]; then
     TS3_HOST="${TS3_HOST:-localhost}"
     TS3_VOICE_PORT="${TS3_VOICE_PORT:-9987}"
     TS3_NICKNAME="${TS3_NICKNAME:-MusicBot}"
-    CONNECT_URL="ts3://${TS3_HOST}:${TS3_VOICE_PORT}?nickname=${TS3_NICKNAME}"
-    echo "TS3 connection URL: $CONNECT_URL"
+    # NOTE: Do NOT pass ts3:// URL on the command line -- it causes the
+    # client to exit silently (code 0) after the license dialog is dismissed.
+    # Instead, we start the client without arguments and use ClientQuery
+    # (telnet-like API on port 25639) to explicitly trigger the connection
+    # after the license dialog has been handled.
+    echo "TS3 connection URL: ts3://${TS3_HOST}:${TS3_VOICE_PORT} (via ClientQuery)"
 
     # Verify settings.db is in the correct location (ts3bot's home, NOT root's)
     echo "Checking settings.db location..."
@@ -189,7 +193,7 @@ if [ -n "$TS3BIN" ]; then
         XDG_RUNTIME_DIR="/tmp/runtime-ts3bot" \
         HOME="/home/ts3bot" \
         QT_DEBUG_PLUGINS=1 \
-        /opt/ts3client/"$TS3BIN" "$CONNECT_URL" > /data/logs/ts3client.log 2>&1 &
+        /opt/ts3client/"$TS3BIN" > /data/logs/ts3client.log 2>&1 &
     TS3_PID=$!
     echo "TS3 Client launching as ts3bot user (PID: $TS3_PID)..."
 
@@ -305,25 +309,84 @@ if [ -n "$TS3BIN" ]; then
         echo "  WARNING: Could not dismiss license dialog on attempt $attempt"
     done
 
-    # After dismissing, wait for client to process and connect
+    # After dismissing license dialog, connect via ClientQuery
     if xdotool search --name "License" > /dev/null 2>&1; then
         echo "WARNING: License dialog could not be dismissed after all attempts"
     else
-        echo "License dialog handled. Waiting for TS3 client connection..."
-        sleep 10
+        echo "License dialog handled. Connecting via ClientQuery..."
+        sleep 2
+
+        # Read the ClientQuery API key from config
+        CQ_API_KEY=$(grep 'api_key=' /home/ts3bot/.ts3client/clientquery.ini 2>/dev/null | head -1 | cut -d'=' -f2)
+        if [ -z "$CQ_API_KEY" ]; then
+            echo "WARNING: Could not read ClientQuery API key"
+        fi
+
+        # Wait for ClientQuery port to become available, then connect
+        python3 - "$TS3_HOST" "$TS3_VOICE_PORT" "$TS3_NICKNAME" "$CQ_API_KEY" <<'PYEOF'
+import socket, sys, time
+
+host, port, nickname, api_key = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+connected = False
+
+for attempt in range(20):
+    if attempt > 0:
+        time.sleep(1)
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        sock.connect(("127.0.0.1", 25639))
+        time.sleep(0.3)
+        welcome = sock.recv(4096).decode(errors="replace").strip()
+        if "TS3 Client connected" not in welcome and "welcome" not in welcome.lower():
+            # Might need more time
+            sock.close()
+            continue
+        print(f"  ClientQuery ready: {welcome}")
+
+        # Authenticate
+        if api_key:
+            sock.sendall(f"auth apikey={api_key}\n".encode())
+            time.sleep(0.5)
+            resp = sock.recv(4096).decode(errors="replace").strip()
+            print(f"  Auth response: {resp}")
+
+        # Connect to server
+        sock.sendall(f"connect ip={host} port={port} nickname={nickname}\n".encode())
+        time.sleep(5)
+        resp = sock.recv(4096).decode(errors="replace").strip()
+        print(f"  Connect response: {resp}")
+        if "error" in resp.lower():
+            print(f"  WARNING: Connection may have failed")
+        else:
+            connected = True
+            print(f"  Connected to {host}:{port} as {nickname}")
+
+        sock.close()
+        break
+    except (ConnectionRefusedError, OSError):
+        if attempt % 5 == 0:
+            print(f"  Waiting for ClientQuery port (attempt {attempt+1})...")
+        continue
+    except Exception as e:
+        print(f"  ClientQuery error: {e}")
+        break
+
+if not connected:
+    print("  WARNING: Could not connect via ClientQuery")
+    print("  The TS3 client may still connect via auto-connect bookmark")
+PYEOF
+        sleep 3
     fi
 
-    # Wait for TS3 client to finish connecting
-    echo "Waiting for TS3 client connection..."
-    sleep 10
-
-    # Check if the process is still alive
+    # Verify TS3 client is still running and connected
+    echo "Checking TS3 client status..."
     if kill -0 "$TS3_PID" 2>/dev/null; then
         echo "TS3 Client is running (PID: $TS3_PID)"
         echo "--- TS3 Client log (connection-related) ---"
-        grep -iE "connect|identity|server|channel|login|error|fail|reject|license" /data/logs/ts3client.log 2>/dev/null | tail -30 || echo "  (no connection-related lines)"
-        echo "--- Last 30 lines ---"
-        tail -30 /data/logs/ts3client.log 2>/dev/null || echo "  (no log output yet)"
+        grep -iE "connect|identity|server|channel|login|error|fail|reject" /data/logs/ts3client.log 2>/dev/null | tail -20 || echo "  (no connection-related lines)"
+        echo "--- Last 20 lines ---"
+        tail -20 /data/logs/ts3client.log 2>/dev/null || echo "  (no log output yet)"
         echo "--- End of TS3 Client log ---"
     else
         wait "$TS3_PID" 2>/dev/null
