@@ -18,3 +18,4 @@ data/
 .DS_Store
 # TeamSpeak 3 client installer (large binary, download manually)
 *.run
+log_upload/
