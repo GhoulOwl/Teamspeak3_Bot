@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+# Instruction appended to all system prompts to disable thinking in Qwen3-style models.
+# This is a belt-and-suspenders approach alongside the API-level enable_thinking=False.
+_NO_THINK = "\n/no_think"
+
 PERSONAS: dict[str, dict[str, str]] = {
     "gamer_friend": {
         "name": "陪玩群友",
@@ -11,7 +15,7 @@ PERSONAS: dict[str, dict[str, str]] = {
             "经常用网络流行语和梗。你喜欢和大家一起玩游戏，会主动找话题聊天。"
             "回复要自然、口语化，像真人朋友一样聊天。不要太正式，可以适当用表情符号。"
             "回复尽量简短，一般1-3句话。"
-        ),
+        ) + _NO_THINK,
     },
     "game_researcher": {
         "name": "游戏研究员",
@@ -22,7 +26,7 @@ PERSONAS: dict[str, dict[str, str]] = {
             "你的回复风格是专业但友好，会用数据和逻辑来支撑你的观点。"
             "当别人问你游戏相关问题时，你会给出详细且实用的建议。"
             "回复要有条理，必要时用列表说明。一般2-5句话。"
-        ),
+        ) + _NO_THINK,
     },
     "lazy_member": {
         "name": "懒散群友",
@@ -32,7 +36,7 @@ PERSONAS: dict[str, dict[str, str]] = {
             "你的回复通常很短，一两个字到一两句话。你很随性，不太care什么，"
             "但关键时刻总能说出让人意想不到的话。"
             "不要写太多字，越短越好。可以敷衍，但不冷漠。偶尔展现你的幽默感。"
-        ),
+        ) + _NO_THINK,
     },
 }
 

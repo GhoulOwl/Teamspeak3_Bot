@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 def register(registry: CommandRegistry, app: BotApplication) -> None:
     """Register chat commands."""
 
-    @registry.command("chat", aliases=["ask", "ai"], help="和 AI 聊天")
+    @registry.command("chat", aliases=["ask", "ai", "聊天", "问"], help="和 AI 聊天")
     async def handle_chat(ctx: CommandContext) -> None:
         if not ctx.raw_args:
             await ctx.reply_same("用法: !chat <你的消息>")
@@ -39,7 +39,7 @@ def register(registry: CommandRegistry, app: BotApplication) -> None:
         )
         await ctx.reply_same(reply)
 
-    @registry.command("persona", aliases=["personality"], help="切换 AI 人设")
+    @registry.command("persona", aliases=["personality", "人设", "角色"], help="切换 AI 人设")
     async def handle_persona(ctx: CommandContext) -> None:
         if not ctx.args:
             # List available personas
@@ -68,7 +68,7 @@ def register(registry: CommandRegistry, app: BotApplication) -> None:
         else:
             await ctx.reply_same(f"未知人设: {persona_key}，输入 !persona 查看可用列表")
 
-    @registry.command("clearctx", help="清除 AI 聊天上下文")
+    @registry.command("clearctx", aliases=["清上下文", "清记录"], help="清除 AI 聊天上下文")
     async def handle_clear_ctx(ctx: CommandContext) -> None:
         try:
             info = await app.sq.whoami()

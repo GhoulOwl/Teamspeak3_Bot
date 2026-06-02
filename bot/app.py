@@ -225,14 +225,19 @@ class BotApplication:
             await self._on_playback_stopped()
             return
 
-        # Download audio to local temp file via yt-dlp
+        # Download audio to local temp file via yt-dlp (Netease)
         try:
             downloaded = await self.netease.download_song(entry.song.id)
         except Exception:
             logger.exception("Failed to download song")
-            await self.sq.reply_to_channel(f"下载失败: {entry.song.display_name}")
-            await self._on_playback_stopped()
-            return
+            downloaded = None
+
+        # Fallback: try YouTube/Bilibili when Netease download fails
+        if not downloaded:
+            from bot.core.commands.handlers.music import _try_fallback_download
+            downloaded = await _try_fallback_download(
+                entry.song.title, entry.song.artist, self,
+            )
 
         if not downloaded:
             await self.sq.reply_to_channel(f"歌曲不可用: {entry.song.display_name}")

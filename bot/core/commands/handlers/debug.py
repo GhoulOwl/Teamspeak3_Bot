@@ -17,7 +17,7 @@ def register(registry: CommandRegistry) -> None:
     async def handle_ping(ctx: CommandContext) -> None:
         await ctx.reply_same("pong!")
 
-    @registry.command("status", help="Bot 状态信息")
+    @registry.command("status", aliases=["状态"], help="Bot 状态信息")
     async def handle_status(ctx: CommandContext) -> None:
         uptime = int(time.time() - _start_time)
         hours, remainder = divmod(uptime, 3600)

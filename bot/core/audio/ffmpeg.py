@@ -144,9 +144,19 @@ class FFmpegProcess:
             # overwhelm PulseAudio buffers and cause early stream termination.
             cmd.append("-re")
 
+        # Audio filter chain:
+        #   1. volume   — coarse gain control (user-settable volume)
+        #   2. dynaudnorm — dynamic audio normalizer to keep loudness
+        #      consistent and prevent quiet passages from being cut by
+        #      the TS3 client's voice-activation threshold.
+        #      f=150 : 150 ms analysis window (responsive)
+        #      g=15  : Gaussian smoothing window (avoids pumping)
+        #      p=0.95: peak target at 95 % (conservative, avoids clipping)
+        af_filter = f"volume={gain},dynaudnorm=f=150:g=15:p=0.95"
+
         cmd.extend([
             "-i", url,
-            "-af", f"volume={gain}",
+            "-af", af_filter,
             "-ac", str(self._channels),
             "-ar", str(self._sample_rate),
             "-nostdin",

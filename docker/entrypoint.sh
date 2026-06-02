@@ -31,6 +31,50 @@ runuser -u ts3bot -- env \
     TS3_NICKNAME="${TS3_NICKNAME:-MusicBot}" \
     python3 /opt/bot/docker/ts3client/init_identity.py || echo "Identity init skipped (will use defaults)"
 
+# ── Fix existing bookmarks: disable auto_connect ─────────────────
+# The bookmark auto_connect feature conflicts with ClientQuery connect
+# and can cause double-connection issues. ClientQuery handles connecting.
+echo "Fixing bookmark auto_connect setting..."
+if [ -f /home/ts3bot/.ts3client/settings.db ]; then
+    sqlite3 /home/ts3bot/.ts3client/settings.db \
+        "UPDATE bookmarks SET auto_connect=0 WHERE auto_connect=1;" 2>/dev/null || true
+    # Also ensure license version is high enough to prevent dialog
+    sqlite3 /home/ts3bot/.ts3client/settings.db \
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('license/accepted_version', '99');" 2>/dev/null || true
+    echo "  Bookmarks auto_connect disabled, license version set to 99"
+fi
+
+# ── Block TeamSpeak license/update/CDN servers ──────────────────
+# The TS3 client checks for license updates on startup and downloads
+# remote images (avatars, icons). Even with license/accepted_version
+# set high, the client may still show a blocking modal dialog.
+# Additionally, "Failed to download remote image" errors cause the
+# client to disconnect. Block ALL TeamSpeak domains to prevent this.
+echo "Blocking TeamSpeak license/update/CDN servers..."
+cat >> /etc/hosts <<'HOSTS'
+# Block ALL TeamSpeak servers to prevent license dialog, update checks,
+# CDN image fetches, and telemetry that cause headless client disconnects.
+127.0.0.1 accounting.teamspeak.com
+127.0.0.1 license.teamspeak.com
+127.0.0.1 update.teamspeak.com
+127.0.0.1 files.teamspeak.com
+127.0.0.1 addons.teamspeak.com
+127.0.0.1 named.teamspeak.com
+127.0.0.1 webfiles.teamspeak.com
+127.0.0.1 api.teamspeak.com
+127.0.0.1 myteamspeak.com
+127.0.0.1 www.teamspeak.com
+127.0.0.1 telemetry.teamspeak.com
+127.0.0.1 web.teamspeak.com
+127.0.0.1 news.teamspeak.com
+127.0.0.1 ts3.tracker.baseflow.com
+HOSTS
+
+# ── Clear TS3 client cache to prevent stale update/license data ──
+echo "Clearing TS3 client cache..."
+rm -rf /home/ts3bot/.ts3client/cache/* 2>/dev/null || true
+chown -R ts3bot:ts3bot /home/ts3bot/.ts3client/ 2>/dev/null || true
+
 # ── Start Xvfb (Virtual Display) ─────────────────
 echo "Starting Xvfb..."
 Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset &
@@ -101,8 +145,6 @@ cd /opt/ts3client
 
 # Find TS3 client binary
 # Priority: ts3client_runscript.sh > ts3client_linux_amd64 > fallback search
-# The runscript.sh wrapper sets LD_LIBRARY_PATH correctly for the TS3 client's
-# bundled Qt libraries, which is essential for finding shared libs.
 TS3BIN=""
 for candidate in "ts3client_runscript.sh" "ts3client_linux_amd64" "ts3client_linux.amd64"; do
     if [ -f "$candidate" ]; then
@@ -111,55 +153,30 @@ for candidate in "ts3client_runscript.sh" "ts3client_linux_amd64" "ts3client_lin
     fi
 done
 
-# Fallback: find any file with ts3/teamspeak in name
 if [ -z "$TS3BIN" ]; then
     TS3BIN=$(find . -maxdepth 3 -type f \( -iname "*ts3*runscript*" -o -iname "*ts3client*" \) 2>/dev/null | head -1)
 fi
 
-# Fallback: use 'file' to detect ELF binaries or shell scripts
 if [ -z "$TS3BIN" ]; then
     echo "Searching for executables/scripts in /opt/ts3client..."
     TS3BIN=$(find . -maxdepth 3 -type f \( -name "ts3*" -o -name "TeamSpeak*" \) 2>/dev/null | head -1)
 fi
 
-# Last resort: list ALL files for debugging
 if [ -z "$TS3BIN" ]; then
     echo "DEBUG: All regular files in /opt/ts3client (maxdepth 1):"
     find /opt/ts3client -maxdepth 1 -type f | head -30
-    echo ""
-    echo "DEBUG: All regular files in /opt/ts3client (maxdepth 3, non-.so):"
-    find /opt/ts3client -maxdepth 3 -type f ! -name "*.so" ! -name "*.so.*" | head -30
 fi
 
 if [ -n "$TS3BIN" ]; then
     echo "Found TS3 binary: $TS3BIN"
     chmod +x "$TS3BIN"
 
-    # Pre-flight check: verify all shared libraries are available
-    # Only run ldd on ELF binaries, not shell scripts
-    if command -v ldd > /dev/null 2>&1 && file "./$TS3BIN" | grep -q "ELF"; then
-        MISSING=$(ldd "./$TS3BIN" 2>/dev/null | grep "not found" || true)
-        if [ -n "$MISSING" ]; then
-            echo "ERROR: TS3 client has missing shared libraries:"
-            echo "$MISSING"
-            echo "Install the missing packages in the Dockerfile and rebuild."
-        else
-            echo "All shared libraries satisfied."
-        fi
-    fi
-
-    # Build the ts3:// connection URL to force auto-connect on startup.
     TS3_HOST="${TS3_HOST:-localhost}"
     TS3_VOICE_PORT="${TS3_VOICE_PORT:-9987}"
     TS3_NICKNAME="${TS3_NICKNAME:-MusicBot}"
-    # NOTE: Do NOT pass ts3:// URL on the command line -- it causes the
-    # client to exit silently (code 0) after the license dialog is dismissed.
-    # Instead, we start the client without arguments and use ClientQuery
-    # (telnet-like API on port 25639) to explicitly trigger the connection
-    # after the license dialog has been handled.
-    echo "TS3 connection URL: ts3://${TS3_HOST}:${TS3_VOICE_PORT} (via ClientQuery)"
+    echo "TS3 connection target: ${TS3_HOST}:${TS3_VOICE_PORT} (via ClientQuery)"
 
-    # Verify settings.db is in the correct location (ts3bot's home, NOT root's)
+    # Verify settings.db
     echo "Checking settings.db location..."
     if [ -f /home/ts3bot/.ts3client/settings.db ]; then
         echo "  settings.db found at /home/ts3bot/.ts3client/settings.db (correct)"
@@ -173,7 +190,6 @@ if [ -n "$TS3BIN" ]; then
             2>/dev/null || echo "  (no bookmarks)"
     else
         echo "  WARNING: settings.db NOT found at /home/ts3bot/.ts3client/"
-        ls -la /home/ts3bot/.ts3client/ 2>/dev/null || echo "  (directory does not exist)"
     fi
 
     # Prepare XDG_RUNTIME_DIR for ts3bot user
@@ -182,25 +198,20 @@ if [ -n "$TS3BIN" ]; then
     chown ts3bot:ts3bot /tmp/runtime-ts3bot
 
     # Launch TS3 client as ts3bot user (NOT root!).
-    # Running as ts3bot ensures the client reads/writes to
-    # /home/ts3bot/.ts3client/ where our pre-configured audio settings,
-    # bookmarks, and license acceptance are stored.
-    # Running as root would use /root/.ts3client/ (wrong, empty config).
     runuser -u ts3bot -- env \
         DISPLAY="$DISPLAY" \
         PULSE_SERVER="$PULSE_SERVER" \
         PULSE_RUNTIME_PATH="$PULSE_RUNTIME_PATH" \
         XDG_RUNTIME_DIR="/tmp/runtime-ts3bot" \
         HOME="/home/ts3bot" \
-        QT_DEBUG_PLUGINS=1 \
         /opt/ts3client/"$TS3BIN" > /data/logs/ts3client.log 2>&1 &
     TS3_PID=$!
     echo "TS3 Client launching as ts3bot user (PID: $TS3_PID)..."
 
-    # CRITICAL: Connect via ClientQuery IMMEDIATELY while the port is open.
-    # The ClientQuery port (25639) opens within the first ~3 seconds.
-    # xdotool license dialog dismissal causes the TS3 client to exit,
-    # so we must connect BEFORE any xdotool events are sent.
+    # ── Connect via ClientQuery ──────────────────────────────
+    # ClientQuery port (25639) opens within ~3 seconds of client start.
+    # We connect via ClientQuery (not bookmark auto_connect) for reliable
+    # connection control.
     echo "Connecting via ClientQuery..."
     python3 - "$TS3_HOST" "$TS3_VOICE_PORT" "$TS3_NICKNAME" <<'PYEOF'
 import socket, sys, time, os
@@ -278,13 +289,14 @@ for attempt in range(25):
         print(f"  ClientQuery error: {e}")
         break
 
-if not connected:
-    print("  ClientQuery connection attempt completed")
+if connected:
+    print("  ClientQuery: connected successfully!")
+else:
+    print("  ClientQuery: connection attempt completed (may need retry)")
 PYEOF
     echo "ClientQuery connection attempt finished."
 
-    # Now dismiss the license dialog (if still present).
-    # The connection is already in progress via ClientQuery.
+    # ── Handle license dialog (if it still appears despite /etc/hosts block) ──
     echo "Checking for blocking license dialog..."
     license_dialog_present() {
         xdotool search --name "License" > /dev/null 2>&1
@@ -300,70 +312,146 @@ PYEOF
         GEO=$(xdotool getwindowgeometry --shell "$WINDOW" 2>/dev/null)
         eval "$GEO"
         W=${WIDTH:-740}; H=${HEIGHT:-700}
+
+        # Focus the dialog window
         xdotool windowactivate --sync "$WINDOW" 2>/dev/null || true
-        sleep 0.3
-        CX=$((W / 2)); CY=$((H / 2))
-        xdotool mousemove --window "$WINDOW" "$CX" "$CY" 2>/dev/null || true
-        xdotool click 1 2>/dev/null || true
-        sleep 0.3
-        license_dialog_present || { echo "  License dialog dismissed!"; break; }
+        sleep 0.5
 
-        echo "  Scrolling license text to bottom..."
-        xdotool key End 2>/dev/null || true
-        sleep 0.3
-        license_dialog_present || { echo "  License dialog dismissed!"; break; }
-        for batch in 1 2 3 4; do
-            for i in $(seq 1 15); do xdotool key Page_Down 2>/dev/null || true; done
-            sleep 0.3
-            license_dialog_present || { echo "  Dismissed during scroll!"; break 2; }
-        done
-        xdotool mousemove --window "$WINDOW" "$CX" "$CY" 2>/dev/null || true
-        for batch in 1 2 3 4; do
-            for i in $(seq 1 20); do xdotool click 5 2>/dev/null || true; done
-            sleep 0.3
-            license_dialog_present || { echo "  Dismissed during scroll!"; break 2; }
-        done
-
-        echo "  Clicking Agree button..."
+        # Click the Agree button (bottom-right area of the dialog)
         BTN_X=$((W - 80)); BTN_Y=$((H - 30))
         xdotool mousemove --window "$WINDOW" "$BTN_X" "$BTN_Y" 2>/dev/null || true
         xdotool click 1 2>/dev/null || true
         sleep 1
         license_dialog_present || { echo "  Dismissed by Agree click!"; break; }
 
+        # Fallback: try clicking center-bottom
+        BTN_X2=$((W / 2)); BTN_Y2=$((H - 40))
+        xdotool mousemove --window "$WINDOW" "$BTN_X2" "$BTN_Y2" 2>/dev/null || true
+        xdotool click 1 2>/dev/null || true
+        sleep 1
+        license_dialog_present || { echo "  Dismissed by center-bottom click!"; break; }
+
+        # Last resort: try Alt+F4 to close the dialog
         xdotool windowactivate --sync "$WINDOW" 2>/dev/null || true
-        for i in $(seq 1 5); do xdotool key Tab 2>/dev/null || true; sleep 0.1; done
-        xdotool key Return 2>/dev/null || true
-        sleep 2
-        license_dialog_present || { echo "  Dismissed by Tab+Enter!"; break; }
+        xdotool key alt+F4 2>/dev/null || true
+        sleep 1
+        license_dialog_present || { echo "  Dismissed by Alt+F4!"; break; }
+
         echo "  WARNING: Could not dismiss license dialog on attempt $attempt"
     done
 
-    # Wait for connection to stabilize
+    # ── Wait for connection to stabilize ──
     sleep 5
 
-    # Verify TS3 client status
+    # ── Verify TS3 client status ──
     echo "Checking TS3 client status..."
     if kill -0 "$TS3_PID" 2>/dev/null; then
         echo "TS3 Client is running (PID: $TS3_PID)"
         grep -iE "connect|identity|server|channel" /data/logs/ts3client.log 2>/dev/null | tail -10 || true
-        tail -10 /data/logs/ts3client.log 2>/dev/null || true
+        tail -5 /data/logs/ts3client.log 2>/dev/null || true
     else
         wait "$TS3_PID" 2>/dev/null
         EXIT_CODE=$?
-        echo "ERROR: TS3 Client exited with code: $EXIT_CODE"
-        tail -30 /data/logs/ts3client.log 2>/dev/null || echo "  (no log output)"
-        echo "Bot will continue without TS3 Client (ServerQuery only mode)"
-        echo "Audio playback to TS3 channels will NOT work."
+        echo "WARNING: TS3 Client exited with code: $EXIT_CODE"
+        tail -20 /data/logs/ts3client.log 2>/dev/null || echo "  (no log output)"
     fi
+
+    # ── Background watchdog: restart TS3 client if it exits ──
+    # This runs in the background and restarts the client + reconnects
+    # via ClientQuery if the client process exits unexpectedly.
+    echo "Starting TS3 client watchdog..."
+    (
+        WATCHDOG_DELAY=10
+        while true; do
+            sleep "$WATCHDOG_DELAY"
+            WATCHDOG_DELAY=5  # shorter delay after first check
+
+            if ! kill -0 "$TS3_PID" 2>/dev/null; then
+                echo "[watchdog] TS3 Client exited, restarting..."
+
+                # Restart the client
+                runuser -u ts3bot -- env \
+                    DISPLAY="$DISPLAY" \
+                    PULSE_SERVER="$PULSE_SERVER" \
+                    PULSE_RUNTIME_PATH="$PULSE_RUNTIME_PATH" \
+                    XDG_RUNTIME_DIR="/tmp/runtime-ts3bot" \
+                    HOME="/home/ts3bot" \
+                    /opt/ts3client/"$TS3BIN" >> /data/logs/ts3client.log 2>&1 &
+                TS3_PID=$!
+                echo "[watchdog] TS3 Client restarted (PID: $TS3_PID)"
+
+                # Wait for ClientQuery to be ready, then reconnect
+                sleep 8
+                python3 - "$TS3_HOST" "$TS3_VOICE_PORT" "$TS3_NICKNAME" <<'WDEOF'
+import socket, sys, time, os
+
+host, port, nickname = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+api_key = ""
+ini_path = "/home/ts3bot/.ts3client/clientquery.ini"
+if os.path.exists(ini_path):
+    with open(ini_path) as f:
+        for line in f:
+            if line.startswith("api_key="):
+                api_key = line.split("=", 1)[1].strip()
+                break
+
+for attempt in range(15):
+    if attempt > 0:
+        time.sleep(1)
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        sock.connect(("127.0.0.1", 25639))
+        time.sleep(0.3)
+        welcome = sock.recv(4096).decode(errors="replace").strip()
+        if "TS3 Client" not in welcome and "Welcome" not in welcome:
+            sock.close()
+            continue
+
+        if api_key:
+            sock.sendall(f"auth apikey={api_key}\n".encode())
+            time.sleep(0.5)
+            sock.recv(4096)
+
+        cmd = f"connect address={host}:{port} nickname={nickname}\n"
+        sock.sendall(cmd.encode())
+        time.sleep(3)
+
+        sock.sendall(b"whoami\n")
+        time.sleep(2)
+        resp = sock.recv(4096).decode(errors="replace").strip()
+        print(f"[watchdog] Reconnect whoami: {resp}")
+        sock.close()
+        break
+    except (ConnectionRefusedError, OSError):
+        continue
+    except Exception:
+        break
+WDEOF
+                echo "[watchdog] Reconnection attempt finished."
+
+                # Handle license dialog after restart
+                sleep 2
+                for _attempt in 1 2 3; do
+                    _WINDOW=$(xdotool search --name "License" 2>/dev/null | head -1 || true)
+                    [ -z "$_WINDOW" ] && break
+                    _GEO=$(xdotool getwindowgeometry --shell "$_WINDOW" 2>/dev/null)
+                    eval "$_GEO"
+                    _W=${WIDTH:-740}; _H=${HEIGHT:-700}
+                    xdotool windowactivate --sync "$_WINDOW" 2>/dev/null || true
+                    sleep 0.3
+                    xdotool mousemove --window "$_WINDOW" "$((_W - 80))" "$((_H - 30))" 2>/dev/null || true
+                    xdotool click 1 2>/dev/null || true
+                    sleep 1
+                done
+            fi
+        done
+    ) &
+    echo "Watchdog started (background PID: $!)"
+
 else
     echo "ERROR: Could not find TS3 client binary in /opt/ts3client"
-    echo "All files in /opt/ts3client root:"
     ls -la /opt/ts3client/
-    echo ""
-    echo "Subdirectories:"
-    find /opt/ts3client -maxdepth 1 -type d
-    echo ""
     echo "Bot will start without TS3 Client (ServerQuery only mode)"
     echo "Audio playback to TS3 channels will NOT work."
 fi

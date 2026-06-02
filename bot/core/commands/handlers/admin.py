@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def register(registry: CommandRegistry, app: BotApplication, prefix: str) -> None:
     """Register admin commands."""
 
-    @registry.command("follow", help="开启/关闭房间跟随模式", admin_only=True)
+    @registry.command("follow", aliases=["跟随"], help="开启/关闭房间跟随模式", admin_only=True)
     async def handle_follow(ctx: CommandContext) -> None:
         if not ctx.args:
             state = "开启" if app.follow_mode.enabled else "关闭"
@@ -35,7 +35,7 @@ def register(registry: CommandRegistry, app: BotApplication, prefix: str) -> Non
         else:
             await ctx.reply_same("用法: !follow on/off")
 
-    @registry.command("remind", help="设置定时提醒: !remind <分钟数> <消息>")
+    @registry.command("remind", aliases=["提醒"], help="设置定时提醒: !remind <分钟数> <消息>")
     async def handle_remind(ctx: CommandContext) -> None:
         if len(ctx.args) < 2:
             await ctx.reply_same("用法: !remind <分钟数> <消息>")
@@ -59,12 +59,12 @@ def register(registry: CommandRegistry, app: BotApplication, prefix: str) -> Non
         asyncio.create_task(delayed_remind())
         await ctx.reply_same(f"已设置 {minutes} 分钟后的提醒: {message}")
 
-    @registry.command("help", aliases=["h"], help="显示帮助信息")
+    @registry.command("help", aliases=["h", "帮助"], help="显示帮助信息")
     async def handle_help(ctx: CommandContext) -> None:
         help_text = registry.format_help(prefix)
         await ctx.reply_same(help_text)
 
-    @registry.command("welcome", help="设置欢迎消息", admin_only=True)
+    @registry.command("welcome", aliases=["欢迎"], help="设置欢迎消息", admin_only=True)
     async def handle_welcome(ctx: CommandContext) -> None:
         if not ctx.raw_args:
             await ctx.reply_same("用法: !welcome <欢迎消息模板>\n支持占位符: {username}, {uid}")

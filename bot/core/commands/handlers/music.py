@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def register(registry: CommandRegistry, app: BotApplication) -> None:
     """Register music commands."""
 
-    @registry.command("play", aliases=["p"], help="搜索并播放歌曲，支持网易云/YouTube/B站链接")
+    @registry.command("play", aliases=["p", "播放", "点歌"], help="搜索并播放歌曲，支持网易云/YouTube/B站链接")
     async def handle_play(ctx: CommandContext) -> None:
         if not ctx.raw_args:
             await ctx.reply_same(
@@ -100,7 +100,7 @@ def register(registry: CommandRegistry, app: BotApplication) -> None:
                 f"已加入队列 (#{pos}): {song.display_name}"
             )
 
-    @registry.command("skip", aliases=["s"], help="投票跳过当前歌曲")
+    @registry.command("skip", aliases=["s", "切歌", "下一首"], help="投票跳过当前歌曲")
     async def handle_skip(ctx: CommandContext) -> None:
         if not app.music_queue.current:
             await ctx.reply_same("当前没有在播放")
@@ -122,7 +122,7 @@ def register(registry: CommandRegistry, app: BotApplication) -> None:
             needed = max(1, channel_users // 2 + 1)
             await ctx.reply_same(f"已投票跳过 ({votes}/{needed})")
 
-    @registry.command("pause", help="暂停播放")
+    @registry.command("pause", aliases=["暂停"], help="暂停播放")
     async def handle_pause(ctx: CommandContext) -> None:
         if app.audio.state.value == "playing":
             await app.audio.pause()
@@ -130,7 +130,7 @@ def register(registry: CommandRegistry, app: BotApplication) -> None:
         else:
             await ctx.reply_same("当前没有在播放")
 
-    @registry.command("resume", help="继续播放")
+    @registry.command("resume", aliases=["继续"], help="继续播放")
     async def handle_resume(ctx: CommandContext) -> None:
         if app.audio.state.value == "paused":
             await app.audio.resume()
@@ -138,23 +138,23 @@ def register(registry: CommandRegistry, app: BotApplication) -> None:
         else:
             await ctx.reply_same("当前没有暂停")
 
-    @registry.command("stop", help="停止播放", admin_only=True)
+    @registry.command("stop", aliases=["停止"], help="停止播放", admin_only=True)
     async def handle_stop(ctx: CommandContext) -> None:
         await app.audio.stop()
         app.music_queue._current = None
         await ctx.reply_same("已停止播放")
 
-    @registry.command("queue", aliases=["q"], help="显示播放队列")
+    @registry.command("queue", aliases=["q", "队列"], help="显示播放队列")
     async def handle_queue(ctx: CommandContext) -> None:
         display = app.music_queue.format_queue()
         await ctx.reply_same(display)
 
-    @registry.command("np", help="显示当前播放信息")
+    @registry.command("np", aliases=["正在播放", "当前"], help="显示当前播放信息")
     async def handle_np(ctx: CommandContext) -> None:
         display = app.music_queue.format_now_playing()
         await ctx.reply_same(display)
 
-    @registry.command("lyrics", aliases=["lrc"], help="显示当前歌词")
+    @registry.command("lyrics", aliases=["lrc", "歌词"], help="显示当前歌词")
     async def handle_lyrics(ctx: CommandContext) -> None:
         current = app.music_queue.current
         if not current or current.is_url:
@@ -174,23 +174,23 @@ def register(registry: CommandRegistry, app: BotApplication) -> None:
         display = f"[B]{current.song.title}[/B] 歌词:\n{lyrics.format_display()}"
         await ctx.reply_same(display)
 
-    @registry.command("clear", help="清空队列", admin_only=True)
+    @registry.command("clear", aliases=["清空"], help="清空队列", admin_only=True)
     async def handle_clear(ctx: CommandContext) -> None:
         count = app.music_queue.clear()
         await ctx.reply_same(f"已清空队列 ({count} 首)")
 
-    @registry.command("shuffle", help="随机打乱队列")
+    @registry.command("shuffle", aliases=["随机"], help="随机打乱队列")
     async def handle_shuffle(ctx: CommandContext) -> None:
         app.music_queue.shuffle()
         await ctx.reply_same("已随机打乱队列")
 
-    @registry.command("repeat", aliases=["r"], help="切换重复模式 (关闭/单曲/列表)")
+    @registry.command("repeat", aliases=["r", "重复", "循环"], help="切换重复模式 (关闭/单曲/列表)")
     async def handle_repeat(ctx: CommandContext) -> None:
         mode = app.music_queue.toggle_repeat()
         mode_names = {"off": "关闭", "one": "单曲重复", "all": "列表重复"}
         await ctx.reply_same(f"重复模式: {mode_names.get(mode.value, mode.value)}")
 
-    @registry.command("remove", aliases=["rm"], help="从队列移除第 N 首")
+    @registry.command("remove", aliases=["rm", "移除", "删除"], help="从队列移除第 N 首")
     async def handle_remove(ctx: CommandContext) -> None:
         if not ctx.args:
             await ctx.reply_same("用法: !remove <序号>")
@@ -207,6 +207,37 @@ def register(registry: CommandRegistry, app: BotApplication) -> None:
             await ctx.reply_same(f"已移除: {entry.song.display_name}")
         else:
             await ctx.reply_same("无效的序号")
+
+
+async def _try_fallback_download(song_name: str, artist: str, app: BotApplication):
+    """Try to download a song from alternative sources when Netease fails.
+
+    Searches YouTube and Bilibili for the song and returns a DownloadedAudio
+    if found, or None if all sources fail.
+    """
+    query = f"{song_name} {artist}".strip()
+    fallback_urls = [
+        f"ytsearch1:{query}",  # YouTube search
+        f"bilisearch1:{query}",  # Bilibili search
+    ]
+
+    for search_url in fallback_urls:
+        try:
+            info = await app.netease._ytdlp.extract_audio(search_url)
+            if not info or info.duration < 30:
+                continue
+            downloaded = await app.netease.download_url(search_url)
+            if downloaded:
+                logger.info(
+                    "Fallback download succeeded: %s from %s",
+                    song_name, info.source,
+                )
+                return downloaded
+        except Exception:
+            logger.debug("Fallback search failed for %s via %s", query, search_url)
+            continue
+
+    return None
 
 
 async def _play_next(app: BotApplication) -> None:
@@ -228,6 +259,9 @@ async def _play_next(app: BotApplication) -> None:
                         temp_file=downloaded.path,
                         duration=downloaded.duration,
                     )
+                    await app.sq.reply_to_channel(
+                        f"正在播放: {entry.song.display_name} - 点歌: {entry.requester_name}"
+                    )
                     return
             except Exception:
                 logger.exception("Failed to download audio: %s", original_url)
@@ -236,14 +270,22 @@ async def _play_next(app: BotApplication) -> None:
         await _play_next(app)
         return
 
-    # Download audio to local temp file via yt-dlp
+    # Download audio to local temp file via yt-dlp (Netease)
     try:
         downloaded = await app.netease.download_song(entry.song.id)
     except Exception:
         logger.exception("Failed to download song %d", entry.song.id)
-        await app.sq.reply_to_channel(f"下载失败: {entry.song.display_name}")
-        await _play_next(app)
-        return
+        downloaded = None
+
+    # Fallback: try YouTube/Bilibili when Netease download fails (VIP/region restricted)
+    if not downloaded:
+        logger.info(
+            "Netease download failed for '%s', trying fallback sources...",
+            entry.song.display_name,
+        )
+        downloaded = await _try_fallback_download(
+            entry.song.title, entry.song.artist, app,
+        )
 
     if not downloaded:
         await app.sq.reply_to_channel(
@@ -252,8 +294,15 @@ async def _play_next(app: BotApplication) -> None:
         await _play_next(app)
         return
 
-    await app.audio.play(
-        downloaded.path,
-        temp_file=downloaded.path,
-        duration=downloaded.duration,
-    )
+    try:
+        await app.audio.play(
+            downloaded.path,
+            temp_file=downloaded.path,
+            duration=downloaded.duration,
+        )
+        await app.sq.reply_to_channel(
+            f"正在播放: {entry.song.display_name} - 点歌: {entry.requester_name}"
+        )
+    except Exception:
+        logger.exception("Failed to play song")
+        await _play_next(app)

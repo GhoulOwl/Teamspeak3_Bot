@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def register(registry: CommandRegistry, app: BotApplication) -> None:
     """Register volume commands."""
 
-    @registry.command("volume", aliases=["vol", "v"], help="查看或调节音量 (0-100)")
+    @registry.command("volume", aliases=["vol", "v", "音量"], help="查看或调节音量 (0-100)")
     async def handle_volume(ctx: CommandContext) -> None:
         current = app.audio.volume
 

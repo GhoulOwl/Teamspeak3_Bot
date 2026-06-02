@@ -98,7 +98,7 @@ def _apply_critical_settings(cursor: sqlite3.Cursor) -> None:
         # Pre-accept license to prevent blocking dialog in headless mode.
         # The LicenseViewer log shows "require accept=1" for version 5,
         # which creates a modal dialog that blocks the ts3:// URL handler.
-        "license/accepted_version": "5",
+        "license/accepted_version": "99",
         # Additional keys that may suppress license/EULA dialogs
         "gui/eula_accepted": "1",
         "gui/license_accepted": "1",
@@ -184,8 +184,12 @@ def init_settings():
         "sound/volume/master": "100",
         "sound/volume/microphone": "100",
         "sound/volume/speaker": "100",
-        # Disable voice activation (we only play audio, no mic)
+        # Disable voice activation (we only play audio, no mic).
+        # Also set the activation level to maximum sensitivity so
+        # quiet audio passages are never gated out.
         "capture/voiceactivation": "0",
+        "capture/voiceactivation_level": "0",
+        "capture/volume": "100",
         # Connection settings
         "connection/auto_reconnect": "1",
         # Start capturing on connect (critical: TS3 must transmit audio)
@@ -214,9 +218,9 @@ def init_settings():
         cursor.execute(
             """INSERT INTO bookmarks (name, address, port, nickname, auto_connect)
                VALUES (?, ?, ?, ?, ?)""",
-            ("Bot Server", ts3_host, ts3_port, ts3_nickname, 1),
+            ("Bot Server", ts3_host, ts3_port, ts3_nickname, 0),
         )
-        print(f"  Added auto-connect bookmark for {ts3_host}:{ts3_port}")
+        print(f"  Added bookmark for {ts3_host}:{ts3_port} (auto_connect=0, ClientQuery handles connect)")
     else:
         print("  WARNING: TS3_HOST not set, no bookmark created")
 

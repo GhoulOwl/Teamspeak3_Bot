@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from openai import AsyncOpenAI
 
@@ -10,6 +11,34 @@ from bot.services.chat.context import ContextManager
 from bot.services.chat.personas import PERSONAS, get_persona
 
 logger = logging.getLogger(__name__)
+
+# Pattern to strip <think>...</think> tags that some thinking models leak into content
+_THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def _extract_reply(response) -> str:
+    """Extract the usable reply text from an OpenAI-compatible response.
+
+    Handles thinking models (e.g. Qwen3) where the actual answer may live
+    in ``reasoning_content`` when ``content`` is empty, and strips any
+    leaked ``<think>`` tags.
+    """
+    choice = response.choices[0]
+    msg = choice.message
+
+    content = (msg.content or "").strip()
+
+    # Some thinking models expose a separate reasoning_content field.
+    # If the main content is empty, try using reasoning_content as fallback.
+    if not content or _THINK_TAG_RE.sub("", content).strip() == "":
+        reasoning = getattr(msg, "reasoning_content", None)
+        if reasoning and reasoning.strip():
+            content = reasoning.strip()
+
+    # Strip <think>...</think> tags if present in content
+    content = _THINK_TAG_RE.sub("", content).strip()
+
+    return content or "..."
 
 
 class ChatService:
@@ -91,18 +120,29 @@ class ChatService:
         # Build messages
         messages = buffer.get_messages(system_prompt=system_prompt)
 
+        # Build extra kwargs for thinking model control.
+        # For Qwen3-style models on LM Studio / OpenAI-compatible APIs,
+        # passing enable_thinking=False disables the thinking chain and
+        # ensures the reply lands in ``content`` rather than
+        # ``reasoning_content``.
+        extra_kwargs: dict = {}
+        if "qwen" in self._model.lower():
+            extra_kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+
         try:
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=messages,
                 temperature=self._temperature,
                 max_tokens=self._max_tokens,
+                **extra_kwargs,
             )
         except Exception as e:
             logger.exception("AI chat API error")
             return f"AI 回复出错了: {e}"
 
-        reply = response.choices[0].message.content or "..."
+        reply = _extract_reply(response)
+        logger.debug("AI raw content=%r, reply=%r", response.choices[0].message.content, reply)
 
         # Add assistant response to context
         buffer.add("assistant", reply)
