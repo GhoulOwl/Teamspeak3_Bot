@@ -16,41 +16,61 @@ import sys
 
 
 def _init_identity(cursor: sqlite3.Cursor) -> None:
-    """Ensure the identities table exists and generate an identity if needed.
+    """Check if an identity exists; generate one if the table exists but is empty.
 
     The TS3 Client requires an ECDSA identity (on P-256 curve) stored in a
-    proprietary obfuscated format.  Without a valid identity the client
-    cannot connect to any server.
+    proprietary obfuscated format.  The client creates the identities table
+    with its own schema on first launch.
 
-    We generate the identity here using the same algorithm as TS3AudioBot
-    (TsCrypt.GenerateNewIdentity) to ensure the correct encoding.
+    We only insert a pre-generated identity if the table already exists and
+    is empty.  On first run, we let the TS3 Client create the table itself.
     """
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS identities (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            key_blob TEXT,
-            valid_until INTEGER DEFAULT 0,
-            nickname TEXT DEFAULT ''
-        )
-    """)
-
-    cursor.execute("SELECT COUNT(*) FROM identities")
-    count = cursor.fetchone()[0]
-    if count > 0:
-        print(f"  Identity already exists ({count} found), TS3 Client will use it")
+    # Check if the identities table exists (created by TS3 client previously)
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='identities'"
+    )
+    if cursor.fetchone() is None:
+        print("  No identities table yet -- TS3 Client will create it on first run")
         return
 
-    print("  No identity found -- generating new ECDSA identity...")
+    # Table exists -- check if there's already an identity
+    # Try multiple possible column names for the identity blob
+    for col in ("identity", "key_blob"):
+        try:
+            cursor.execute(f"SELECT COUNT(*) FROM identities WHERE {col} IS NOT NULL AND {col} != ''")
+            count = cursor.fetchone()[0]
+            if count > 0:
+                print(f"  Identity already exists ({count} found in '{col}'), TS3 Client will use it")
+                return
+        except sqlite3.OperationalError:
+            continue
+
+    print("  Identities table exists but is empty -- generating new ECDSA identity...")
     try:
         from docker.ts3client.generate_identity import generate_identity
     except ImportError:
-        # Fallback for when running inside container with different path
         sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
         from generate_identity import generate_identity
 
     identity_str, client_uid, key_offset = generate_identity(target_level=8)
+
+    # Detect the correct column name used by the TS3 client
+    cursor.execute("PRAGMA table_info(identities)")
+    columns = [row[1] for row in cursor.fetchall()]
+    print(f"  Identities table columns: {columns}")
+
+    identity_col = None
+    for col in ("identity", "key_blob"):
+        if col in columns:
+            identity_col = col
+            break
+
+    if identity_col is None:
+        print(f"  WARNING: No identity column found in {columns}, cannot insert")
+        return
+
     cursor.execute(
-        "INSERT INTO identities (key_blob, nickname) VALUES (?, ?)",
+        f"INSERT INTO identities ({identity_col}, nickname) VALUES (?, ?)",
         (identity_str, ""),
     )
     print(f"  Generated identity: {identity_str[:30]}...")

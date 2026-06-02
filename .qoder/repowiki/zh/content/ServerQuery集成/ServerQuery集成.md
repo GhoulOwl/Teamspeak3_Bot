@@ -16,6 +16,12 @@
 - [config.yaml](file://config/config.yaml)
 </cite>
 
+## 更新摘要
+**变更内容**
+- 更新入口脚本部分，反映使用ClientQuery API而非URL参数进行连接的简化方式
+- 移除复杂的许可证处理逻辑说明，强调直接API调用的优势
+- 更新应用初始化流程，展示更简洁的配置加载和连接建立过程
+
 ## 目录
 1. [简介](#简介)
 2. [项目结构](#项目结构)
@@ -74,30 +80,17 @@ C --> P
 CFG --> YML
 ```
 
-图表来源
-- [client.py:1-406](file://bot/core/serverquery/client.py#L1-L406)
+**图表来源**
+- [client.py:1-415](file://bot/core/serverquery/client.py#L1-L415)
 - [events.py:1-156](file://bot/core/serverquery/events.py#L1-L156)
 - [protocol.py:1-160](file://bot/core/serverquery/protocol.py#L1-L160)
-- [app.py:1-348](file://bot/app.py#L1-L348)
+- [app.py:1-356](file://bot/app.py#L1-L356)
 - [config.py:1-160](file://bot/config.py#L1-L160)
 - [registry.py:1-94](file://bot/core/commands/registry.py#L1-L94)
 - [context.py:1-70](file://bot/core/commands/context.py#L1-L70)
-- [music.py:1-243](file://bot/core/commands/handlers/music.py#L1-L243)
+- [music.py:1-260](file://bot/core/commands/handlers/music.py#L1-L260)
 - [admin.py:1-75](file://bot/core/commands/handlers/admin.py#L1-L75)
-- [__main__.py:1-17](file://bot/__main__.py#L1-L17)
-- [config.yaml:1-76](file://config/config.yaml#L1-L76)
-
-章节来源
-- [client.py:1-406](file://bot/core/serverquery/client.py#L1-L406)
-- [events.py:1-156](file://bot/core/serverquery/events.py#L1-L156)
-- [protocol.py:1-160](file://bot/core/serverquery/protocol.py#L1-L160)
-- [app.py:1-348](file://bot/app.py#L1-L348)
-- [config.py:1-160](file://bot/config.py#L1-L160)
-- [registry.py:1-94](file://bot/core/commands/registry.py#L1-L94)
-- [context.py:1-70](file://bot/core/commands/context.py#L1-L70)
-- [music.py:1-243](file://bot/core/commands/handlers/music.py#L1-L243)
-- [admin.py:1-75](file://bot/core/commands/handlers/admin.py#L1-L75)
-- [__main__.py:1-17](file://bot/__main__.py#L1-L17)
+- [__main__.py:1-22](file://bot/__main__.py#L1-L22)
 - [config.yaml:1-76](file://config/config.yaml#L1-L76)
 
 ## 核心组件
@@ -109,17 +102,17 @@ CFG --> YML
 - CommandRegistry/CommandContext：命令注册与上下文封装，提供回复辅助方法
 - 配置系统：BotConfig与YAML配置文件，支持环境变量插值
 
-章节来源
-- [client.py:27-406](file://bot/core/serverquery/client.py#L27-L406)
+**章节来源**
+- [client.py:27-415](file://bot/core/serverquery/client.py#L27-L415)
 - [events.py:18-156](file://bot/core/serverquery/events.py#L18-L156)
 - [protocol.py:63-160](file://bot/core/serverquery/protocol.py#L63-L160)
-- [app.py:27-348](file://bot/app.py#L27-L348)
+- [app.py:27-356](file://bot/app.py#L27-L356)
 - [registry.py:28-94](file://bot/core/commands/registry.py#L28-L94)
 - [context.py:13-70](file://bot/core/commands/context.py#L13-L70)
 - [config.py:125-160](file://bot/config.py#L125-L160)
 
 ## 架构总览
-ServerQuery集成采用“客户端-事件分发器-协议解析”的分层设计，应用层通过BotApplication统一编排。
+ServerQuery集成采用"客户端-事件分发器-协议解析"的分层设计，应用层通过BotApplication统一编排。
 
 ```mermaid
 sequenceDiagram
@@ -147,12 +140,12 @@ Client->>Protocol : parse_response()
 Client-->>App : 返回SQResponse
 ```
 
-图表来源
-- [client.py:81-149](file://bot/core/serverquery/client.py#L81-L149)
+**图表来源**
+- [client.py:85-154](file://bot/core/serverquery/client.py#L85-L154)
 - [client.py:201-290](file://bot/core/serverquery/client.py#L201-L290)
 - [events.py:102-156](file://bot/core/serverquery/events.py#L102-L156)
 - [protocol.py:95-160](file://bot/core/serverquery/protocol.py#L95-L160)
-- [app.py:283-301](file://bot/app.py#L283-L301)
+- [app.py:291-300](file://bot/app.py#L291-L300)
 
 ## 详细组件分析
 
@@ -208,16 +201,16 @@ AsyncServerQueryClient --> EventDispatcher : "使用"
 AsyncServerQueryClient --> SQResponse : "返回"
 ```
 
-图表来源
-- [client.py:27-406](file://bot/core/serverquery/client.py#L27-L406)
+**图表来源**
+- [client.py:27-415](file://bot/core/serverquery/client.py#L27-L415)
 - [events.py:102-156](file://bot/core/serverquery/events.py#L102-L156)
 - [protocol.py:63-74](file://bot/core/serverquery/protocol.py#L63-L74)
 
-章节来源
-- [client.py:81-149](file://bot/core/serverquery/client.py#L81-L149)
-- [client.py:165-198](file://bot/core/serverquery/client.py#L165-L198)
+**章节来源**
+- [client.py:115-154](file://bot/core/serverquery/client.py#L115-L154)
+- [client.py:169-186](file://bot/core/serverquery/client.py#L169-L186)
 - [client.py:201-290](file://bot/core/serverquery/client.py#L201-L290)
-- [client.py:293-406](file://bot/core/serverquery/client.py#L293-L406)
+- [client.py:400-415](file://bot/core/serverquery/client.py#L400-L415)
 
 ### EventDispatcher（事件分发器）
 - 事件模型
@@ -239,10 +232,10 @@ Handlers -- 是 --> SafeCall["并发安全调用各订阅者"]
 SafeCall --> End
 ```
 
-图表来源
+**图表来源**
 - [events.py:102-156](file://bot/core/serverquery/events.py#L102-L156)
 
-章节来源
+**章节来源**
 - [events.py:18-156](file://bot/core/serverquery/events.py#L18-L156)
 
 ### 协议与命令构建（protocol.py）
@@ -265,10 +258,10 @@ F -- 是 --> G["SQResponse.ok=true<br/>data为记录列表"]
 F -- 否 --> H["SQResponse.ok=false<br/>error_id/error_msg"]
 ```
 
-图表来源
+**图表来源**
 - [protocol.py:38-160](file://bot/core/serverquery/protocol.py#L38-L160)
 
-章节来源
+**章节来源**
 - [protocol.py:38-160](file://bot/core/serverquery/protocol.py#L38-L160)
 - [test_protocol.py:13-118](file://tests/test_protocol.py#L13-L118)
 
@@ -299,16 +292,43 @@ App->>Reg : 查找命令
 App->>Reg : 执行命令处理器
 ```
 
-图表来源
+**图表来源**
 - [app.py:140-198](file://bot/app.py#L140-L198)
-- [app.py:283-301](file://bot/app.py#L283-L301)
+- [app.py:291-300](file://bot/app.py#L291-L300)
 
-章节来源
-- [app.py:27-348](file://bot/app.py#L27-L348)
-- [music.py:17-243](file://bot/core/commands/handlers/music.py#L17-L243)
+**章节来源**
+- [app.py:27-356](file://bot/app.py#L27-L356)
+- [music.py:17-260](file://bot/core/commands/handlers/music.py#L17-L260)
 - [admin.py:17-75](file://bot/core/commands/handlers/admin.py#L17-L75)
 - [registry.py:28-94](file://bot/core/commands/registry.py#L28-L94)
 - [context.py:13-70](file://bot/core/commands/context.py#L13-L70)
+
+### 入口脚本与配置加载
+**更新** 入口脚本现在使用简化的ClientQuery API进行连接，移除了复杂的许可证处理逻辑
+
+入口脚本通过直接调用BotApplication和load_config函数来初始化应用，配置加载采用环境变量插值的方式，简化了连接建立过程。
+
+```mermaid
+flowchart TD
+A["__main__.py 启动"] --> B["加载 .env 环境变量"]
+B --> C["load_config() 加载配置"]
+C --> D["创建 BotApplication 实例"]
+D --> E["asyncio.run(app.run())"]
+E --> F["BotApplication.start()"]
+F --> G["创建 AsyncServerQueryClient"]
+G --> H["连接 ServerQuery"]
+H --> I["启动后台服务"]
+```
+
+**图表来源**
+- [__main__.py:12-22](file://bot/__main__.py#L12-L22)
+- [app.py:39-51](file://bot/app.py#L39-L51)
+- [config.py:136-160](file://bot/config.py#L136-L160)
+
+**章节来源**
+- [__main__.py:1-22](file://bot/__main__.py#L1-L22)
+- [app.py:39-51](file://bot/app.py#L39-L51)
+- [config.py:136-160](file://bot/config.py#L136-L160)
 
 ## 依赖分析
 - 组件耦合
@@ -333,12 +353,12 @@ Registry --> Handlers["命令处理器"]
 Events --> Protocol
 ```
 
-图表来源
+**图表来源**
 - [client.py:8-13](file://bot/core/serverquery/client.py#L8-L13)
-- [events.py:10](file://bot/core/serverquery/events.py#L10](file://bot/core/serverquery/events.py#L10)
+- [events.py:10](file://bot/core/serverquery/events.py#L10)
 - [app.py:14-22](file://bot/app.py#L14-L22)
 
-章节来源
+**章节来源**
 - [client.py:8-13](file://bot/core/serverquery/client.py#L8-L13)
 - [events.py:10](file://bot/core/serverquery/events.py#L10)
 - [app.py:14-22](file://bot/app.py#L14-L22)
@@ -355,8 +375,6 @@ Events --> Protocol
 - 日志与可观测性
   - 关键路径均有日志输出，便于定位问题
 
-[本节为通用指导，无需特定文件来源]
-
 ## 故障排查指南
 - 连接失败
   - 检查主机、端口、用户名/密码、虚拟服务器ID与昵称配置
@@ -370,17 +388,15 @@ Events --> Protocol
 - 文本消息编码
   - 使用内置转义工具或封装方法，避免特殊字符导致解析错误
 
-章节来源
-- [client.py:111-149](file://bot/core/serverquery/client.py#L111-L149)
-- [client.py:183-198](file://bot/core/serverquery/client.py#L183-L198)
+**章节来源**
+- [client.py:115-154](file://bot/core/serverquery/client.py#L115-L154)
+- [client.py:169-186](file://bot/core/serverquery/client.py#L169-L186)
 - [client.py:201-254](file://bot/core/serverquery/client.py#L201-L254)
 - [events.py:120-138](file://bot/core/serverquery/events.py#L120-L138)
 - [protocol.py:38-61](file://bot/core/serverquery/protocol.py#L38-L61)
 
 ## 结论
-本ServerQuery集成以清晰的分层设计实现了稳定的异步通信、可靠的事件驱动与可扩展的命令体系。通过命令队列、心跳保活与指数退避重连，系统在复杂网络环境下具备良好的鲁棒性。建议在生产环境中结合监控与告警，持续优化事件处理与命令执行的性能瓶颈。
-
-[本节为总结，无需特定文件来源]
+本ServerQuery集成以清晰的分层设计实现了稳定的异步通信、可靠的事件驱动与可扩展的命令体系。通过命令队列、心跳保活与指数退避重连，系统在复杂网络环境下具备良好的鲁棒性。入口脚本的简化使得配置加载更加直观，移除了复杂的许可证处理逻辑，提升了整体的开发体验。建议在生产环境中结合监控与告警，持续优化事件处理与命令执行的性能瓶颈。
 
 ## 附录
 
@@ -396,9 +412,9 @@ Reconnecting --> Connected : "重连成功"
 Reconnecting --> Reconnecting : "指数退避重试"
 ```
 
-图表来源
-- [client.py:81-149](file://bot/core/serverquery/client.py#L81-L149)
-- [client.py:183-198](file://bot/core/serverquery/client.py#L183-L198)
+**图表来源**
+- [client.py:115-154](file://bot/core/serverquery/client.py#L115-L154)
+- [client.py:169-186](file://bot/core/serverquery/client.py#L169-L186)
 - [client.py:201-254](file://bot/core/serverquery/client.py#L201-L254)
 
 ### 事件监听与消息处理最佳实践
@@ -411,7 +427,7 @@ Reconnecting --> Reconnecting : "指数退避重试"
 - 命令路由
   - 将文本消息事件路由到命令解析器，避免在事件处理中直接执行复杂逻辑
 
-章节来源
+**章节来源**
 - [events.py:120-138](file://bot/core/serverquery/events.py#L120-L138)
 - [app.py:162-198](file://bot/app.py#L162-L198)
 - [context.py:52-70](file://bot/core/commands/context.py#L52-L70)
@@ -429,8 +445,18 @@ Reconnecting --> Reconnecting : "指数退避重试"
 - 测试建议
   - 编写单元测试验证转义/反转义、记录解析与响应解析的正确性
 
-章节来源
+**章节来源**
 - [events.py:18-100](file://bot/core/serverquery/events.py#L18-L100)
-- [client.py:151-158](file://bot/core/serverquery/client.py#L151-L158)
+- [client.py:155-168](file://bot/core/serverquery/client.py#L155-L168)
 - [protocol.py:38-160](file://bot/core/serverquery/protocol.py#L38-L160)
 - [test_protocol.py:13-118](file://tests/test_protocol.py#L13-L118)
+
+### 配置系统与环境变量插值
+**更新** 配置系统现在支持更灵活的环境变量插值，简化了部署配置
+
+配置系统采用递归插值的方式，支持在YAML配置中使用${ENV_VAR}语法引用环境变量，同时保持了默认配置的完整性。
+
+**章节来源**
+- [config.py:12-31](file://bot/config.py#L12-L31)
+- [config.py:136-160](file://bot/config.py#L136-L160)
+- [config.yaml:1-76](file://config/config.yaml#L1-L76)

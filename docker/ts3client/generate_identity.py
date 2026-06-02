@@ -14,11 +14,13 @@ import sys
 from pathlib import Path
 
 # TS3 identity obfuscation key (from TS3AudioBot TsCrypt.cs)
-OBFUSCATION_KEY = bytes.fromhex(
-    "b9dfaa7bee6ac57ac7b65f1094a1c155"
-    "e747327bc2fe5d51c512023fe54a2802"
-    "01004e90ad1daaae1075d53b7d571c30"
-    "e063b5a62a4a017bb394833aa0983e6e"
+# IMPORTANT: The key is the ASCII byte values of the hex STRING,
+# NOT the hex-decoded binary. C# source: Encoding.ASCII.GetBytes("b9df...")
+OBFUSCATION_KEY = (
+    b"b9dfaa7bee6ac57ac7b65f1094a1c155"
+    b"e747327bc2fe5d51c512023fe54a2802"
+    b"01004e90ad1daaae1075d53b7d571c30"
+    b"e063b5a62a4a017bb394833aa0983e6e"
 )
 
 
@@ -157,36 +159,35 @@ def _public_key_string(pub_x: int, pub_y: int) -> str:
 def obfuscate_identity(der_bytes: bytes, level: int) -> str:
     """Obfuscate the ASN.1 DER identity into TS3 native format.
 
-    The import (deobfuscate) process from TS3AudioBot:
-      1. SHA1 = hash(obf_bytes[20:])
-      2. XOR obf_bytes[20:] with SHA1
+    The import (deobfuscate) process from TS3AudioBot TsCrypt.cs:
+      1. SHA1 = hash(stored_bytes[20:hash_len])  (hash_len = len-20 or to null)
+      2. XOR stored_bytes[0:20] with SHA1[0:20]   ← only first 20 bytes!
       3. XOR bytes[0:min(100,len)] with OBFUSCATION_KEY
       4. Base64 decode → ASN.1 DER
 
-    Export (obfuscate) must reverse:
+    Export (obfuscate) reverses in opposite order:
       1. Base64 encode ASN.1 DER → orig_bytes
-      2. XOR orig[0:min(100,len)] with OBFUSCATION_KEY
+      2. XOR orig[0:min(100,len)] with OBFUSCATION_KEY  (ASCII key, 128 bytes)
       3. SHA1 = hash(result[20:])
-      4. XOR result[20:] with SHA1
-      → obfuscated bytes, stored as "{level}V{base64(obfuscated)}"
+      4. XOR result[0:20] with SHA1[0:20]  ← only first 20 bytes!
+      5. Outer Base64 encode → "{level}V{base64(obfuscated)}"
     """
     # Step 1: Base64 encode the DER bytes
     b64_data = bytearray(base64.b64encode(der_bytes))
 
-    # Step 2: XOR first min(100, len) bytes with OBFUSCATION_KEY
+    # Step 2: XOR first min(100, len) bytes with OBFUSCATION_KEY (ASCII key!)
     xor_len = min(100, len(b64_data))
     for i in range(xor_len):
         b64_data[i] ^= OBFUSCATION_KEY[i % len(OBFUSCATION_KEY)]
 
     # Step 3: Compute SHA1 of bytes [20:]
-    data_from_20 = bytes(b64_data[20:])
-    sha1_hash = hashlib.sha1(data_from_20).digest()
+    sha1_hash = hashlib.sha1(bytes(b64_data[20:])).digest()
 
-    # Step 4: XOR bytes [20:] with SHA1
-    for i in range(len(data_from_20)):
-        b64_data[20 + i] ^= sha1_hash[i % len(sha1_hash)]
+    # Step 4: XOR FIRST 20 bytes with SHA1 (NOT bytes [20:]!)
+    for i in range(min(20, len(b64_data))):
+        b64_data[i] ^= sha1_hash[i]
 
-    # The obfuscated bytes are stored as base64 in the identity string
+    # Step 5: Outer base64 encode
     obfuscated_b64 = base64.b64encode(bytes(b64_data)).decode("ascii")
     return f"{level}V{obfuscated_b64}"
 
