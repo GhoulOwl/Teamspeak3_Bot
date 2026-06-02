@@ -201,7 +201,15 @@ if [ -n "$TS3BIN" ]; then
     # IMPORTANT: The TS3 license dialog requires scrolling the license
     # text to the bottom before the "Agree" button becomes clickable.
     # Openbox WM is required for xdotool windowactivate to work.
+    # CRITICAL: After each xdotool action, check if dialog is gone to
+    # prevent stray events from reaching the main TS3 window.
     echo "Checking for blocking license dialog..."
+
+    # Helper: returns 0 if license dialog is still present
+    license_dialog_present() {
+        xdotool search --name "License" > /dev/null 2>&1
+    }
+
     for attempt in 1 2 3 4 5 6 7 8 9 10; do
         WINDOW=$(xdotool search --name "License" 2>/dev/null | head -1 || true)
         if [ -z "$WINDOW" ]; then
@@ -215,51 +223,59 @@ if [ -n "$TS3BIN" ]; then
 
         echo "  License dialog detected (attempt $attempt, window: $WINDOW)"
 
-        # Get dialog geometry to calculate button position
+        # Get dialog geometry
         GEO=$(xdotool getwindowgeometry --shell "$WINDOW" 2>/dev/null)
         eval "$GEO"
-        # Defaults if geometry fails (TS3 license dialog is typically 740x700)
         W=${WIDTH:-740}
         H=${HEIGHT:-700}
         echo "  Dialog size: ${W}x${H}"
 
-        # Activate the dialog (requires window manager like openbox)
+        # Activate the dialog
         xdotool windowactivate --sync "$WINDOW" 2>/dev/null || true
         sleep 0.3
 
-        # Step 1: Click in the center of the dialog to focus the text area
+        # Step 1: Click center to focus the text area
         CX=$((W / 2))
         CY=$((H / 2))
         xdotool mousemove --window "$WINDOW" "$CX" "$CY" 2>/dev/null || true
         xdotool click 1 2>/dev/null || true
         sleep 0.3
+        license_dialog_present || { echo "  License dialog dismissed!"; break; }
 
-        # Step 2: Scroll to bottom of license text to enable Agree button
+        # Step 2: Scroll to bottom incrementally, checking after each batch
         echo "  Scrolling license text to bottom..."
         xdotool key End 2>/dev/null || true
-        sleep 0.2
-        for i in $(seq 1 40); do
-            xdotool key Page_Down 2>/dev/null || true
-        done
         sleep 0.3
-        # Also use mouse wheel scroll
-        xdotool mousemove --window "$WINDOW" "$CX" "$CY" 2>/dev/null || true
-        for i in $(seq 1 80); do
-            xdotool click 5 2>/dev/null || true
-        done
-        sleep 0.5
+        license_dialog_present || { echo "  License dialog dismissed!"; break; }
 
-        # Step 3: Click the Agree button (bottom-right area of dialog)
-        # Qt dialog button layout: Agree/OK is typically on the right
-        # Button is ~80-100px wide, ~30px tall, ~10-20px from bottom/right
+        for batch in 1 2 3 4; do
+            for i in $(seq 1 15); do
+                xdotool key Page_Down 2>/dev/null || true
+            done
+            sleep 0.3
+            license_dialog_present || { echo "  License dialog dismissed during scroll!"; break 2; }
+        done
+
+        # Mouse wheel scroll
+        xdotool mousemove --window "$WINDOW" "$CX" "$CY" 2>/dev/null || true
+        for batch in 1 2 3 4; do
+            for i in $(seq 1 20); do
+                xdotool click 5 2>/dev/null || true
+            done
+            sleep 0.3
+            license_dialog_present || { echo "  License dialog dismissed during scroll!"; break 2; }
+        done
+
+        # Step 3: Click Agree button (bottom-right area)
         echo "  Clicking Agree button..."
         BTN_X=$((W - 80))
         BTN_Y=$((H - 30))
         xdotool mousemove --window "$WINDOW" "$BTN_X" "$BTN_Y" 2>/dev/null || true
         xdotool click 1 2>/dev/null || true
         sleep 1
+        license_dialog_present || { echo "  License dialog dismissed by Agree click!"; break; }
 
-        # Step 4: Also try Tab + Enter as backup
+        # Step 4: Tab + Enter as backup
         xdotool windowactivate --sync "$WINDOW" 2>/dev/null || true
         for i in $(seq 1 5); do
             xdotool key Tab 2>/dev/null || true
@@ -267,35 +283,35 @@ if [ -n "$TS3BIN" ]; then
         done
         xdotool key Return 2>/dev/null || true
         sleep 2
+        license_dialog_present || { echo "  License dialog dismissed by Tab+Enter!"; break; }
 
-        # Check if dialog is gone
-        if ! xdotool search --name "License" > /dev/null 2>&1; then
-            echo "  License dialog dismissed!"
-            break
-        fi
-
-        # Step 5: Brute-force click grid in the button area
-        echo "  Dialog still present, trying grid click in button area..."
+        # Step 5: Grid click brute force
+        echo "  Dialog still present, trying grid click..."
+        DISMISSED=0
         for bx in $((W-60)) $((W-100)) $((W-140)) $((W-180)); do
             for by in $((H-25)) $((H-40)) $((H-55)) $((H-70)); do
                 xdotool mousemove --window "$WINDOW" "$bx" "$by" 2>/dev/null || true
                 xdotool click 1 2>/dev/null || true
                 sleep 0.3
-                if ! xdotool search --name "License" > /dev/null 2>&1; then
+                if ! license_dialog_present; then
                     echo "  Dismissed by clicking at ($bx, $by)!"
+                    DISMISSED=1
                     break 2
                 fi
             done
         done
+        [ "$DISMISSED" = "1" ] && break
 
-        # Final check
-        if xdotool search --name "License" > /dev/null 2>&1; then
-            echo "  WARNING: Could not dismiss license dialog on attempt $attempt"
-        else
-            echo "  License dialog dismissed!"
-            break
-        fi
+        echo "  WARNING: Could not dismiss license dialog on attempt $attempt"
     done
+
+    # After dismissing, wait for client to process and connect
+    if xdotool search --name "License" > /dev/null 2>&1; then
+        echo "WARNING: License dialog could not be dismissed after all attempts"
+    else
+        echo "License dialog handled. Waiting for TS3 client connection..."
+        sleep 10
+    fi
 
     # Wait for TS3 client to finish connecting
     echo "Waiting for TS3 client connection..."
