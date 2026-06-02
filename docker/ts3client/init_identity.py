@@ -1,12 +1,74 @@
 """Initialize TeamSpeak 3 client identity and audio settings.
 
 This script creates a minimal settings.db for the headless TS3 client,
-configuring audio devices to use the PulseAudio null sink.
+configuring audio devices to use the PulseAudio null sink and generating
+an RSA identity if one does not already exist.
 """
 
 import os
 import sqlite3
+import subprocess
 import sys
+
+
+def _generate_identity_via_openssl() -> str | None:
+    """Generate an RSA 2048 private key using the openssl CLI tool.
+
+    Returns PEM-encoded key string, or None on failure.
+    """
+    try:
+        result = subprocess.run(
+            ["openssl", "genrsa", "2048"],
+            capture_output=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and b"BEGIN RSA PRIVATE KEY" in result.stdout:
+            return result.stdout.decode("ascii")
+        print("openssl genrsa returned non-zero or unexpected output", file=sys.stderr)
+    except FileNotFoundError:
+        print("openssl not found, skipping identity generation", file=sys.stderr)
+    except subprocess.TimeoutExpired:
+        print("openssl genrsa timed out", file=sys.stderr)
+    return None
+
+
+def _init_identity(cursor: sqlite3.Cursor) -> None:
+    """Create the identities table and insert a generated RSA key if none exists.
+
+    The TS3 Client stores identities in the settings.db SQLite database.
+    Each identity is an RSA key pair used for server authentication.
+    Without a valid identity, the client cannot connect to any server.
+    """
+    # Create the identities table (TS3 Client expects this schema)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS identities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key_blob TEXT,
+            valid_until INTEGER DEFAULT 0,
+            nickname TEXT DEFAULT ''
+        )
+    """)
+
+    # Check if any identity already exists
+    cursor.execute("SELECT COUNT(*) FROM identities")
+    count = cursor.fetchone()[0]
+    if count > 0:
+        print(f"  Identity already exists ({count} found), skipping generation")
+        return
+
+    # Generate RSA key via openssl
+    pem_key = _generate_identity_via_openssl()
+    if pem_key is None:
+        print("  WARNING: Could not generate identity via openssl.")
+        print("  The TS3 Client will attempt to generate one on first launch.")
+        return
+
+    # Store the PEM key in the identities table
+    cursor.execute(
+        "INSERT INTO identities (key_blob, valid_until, nickname) VALUES (?, ?, ?)",
+        (pem_key.strip(), 0, ""),
+    )
+    print("  Generated and stored new RSA identity")
 
 
 def init_settings():
@@ -17,6 +79,16 @@ def init_settings():
 
     if os.path.exists(db_path):
         print(f"Settings database already exists: {db_path}")
+        # Still check for identity
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        try:
+            _init_identity(cursor)
+            conn.commit()
+        except Exception as e:
+            print(f"  Identity check failed: {e}", file=sys.stderr)
+        finally:
+            conn.close()
         return
 
     print(f"Creating settings database: {db_path}")
@@ -57,6 +129,8 @@ def init_settings():
         "capture/voiceactivation": "0",
         # Connection settings
         "connection/auto_reconnect": "1",
+        # Start capturing on connect (critical: TS3 must transmit audio)
+        "capture/autostart": "1",
     }
 
     for key, value in audio_settings.items():
@@ -64,6 +138,10 @@ def init_settings():
             "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
             (key, value),
         )
+
+    # Generate and store identity
+    print("Generating TS3 identity...")
+    _init_identity(cursor)
 
     # Add bookmark for auto-connect
     ts3_host = os.environ.get("TS3_HOST", "")
@@ -76,7 +154,9 @@ def init_settings():
                VALUES (?, ?, ?, ?, ?)""",
             ("Bot Server", ts3_host, ts3_port, ts3_nickname, 1),
         )
-        print(f"Added auto-connect bookmark for {ts3_host}:{ts3_port}")
+        print(f"  Added auto-connect bookmark for {ts3_host}:{ts3_port}")
+    else:
+        print("  WARNING: TS3_HOST not set, no bookmark created")
 
     conn.commit()
     conn.close()

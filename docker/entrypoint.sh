@@ -23,6 +23,9 @@ sleep 1
 if [ ! -f /home/ts3bot/.ts3client/settings.db ]; then
     echo "Initializing TS3 client identity..."
     python3 /opt/bot/docker/ts3client/init_identity.py || echo "Identity init skipped (will use defaults)"
+else
+    echo "Settings database exists, checking identity..."
+    python3 /opt/bot/docker/ts3client/init_identity.py || true
 fi
 
 # ── Start Xvfb (Virtual Display) ─────────────────
@@ -36,30 +39,17 @@ echo "Xvfb started (PID: $XVFB_PID)"
 echo "Starting PulseAudio..."
 # Use user mode (--start without --system) to avoid permission issues
 # System mode switches to 'pulse' user which can't access /tmp properly
+# NOTE: Modules are loaded via /etc/pulse/default.pa — do NOT load them
+# again via pactl, as that creates duplicate module instances and breaks
+# audio routing (FFmpeg and TS3 client would use different sink instances).
 pulseaudio --start \
   --exit-idle-time=-1 \
   --log-level=info \
   --log-target=file:/data/logs/pulseaudio.log 2>/dev/null || true
 sleep 2
 
-# Set environment for pactl
+# Set environment for pactl and all child processes
 export PULSE_SERVER=unix:/tmp/pulse-native
-
-# Load required modules via pactl
-echo "Configuring PulseAudio modules..."
-pactl load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-native 2>/dev/null || true
-pactl load-module module-null-sink sink_name=ts3bot_sink sink_properties=device.description="TS3Bot_Virtual_Sink" 2>/dev/null || true
-pactl set-default-sink ts3bot_sink 2>/dev/null || true
-
-# ── Audio routing: make null sink's monitor the default capture source ──
-# The TS3 Client captures from the default PulseAudio source.
-# By setting ts3bot_sink.monitor as default source, TS3 will capture
-# the bot's audio output.
-pactl set-default-source ts3bot_sink.monitor 2>/dev/null || true
-# Ensure a default source always exists (fallback)
-pactl load-module module-always-source 2>/dev/null || true
-
-sleep 1
 
 # ── Verify PulseAudio is running ─────────────────
 echo "Verifying PulseAudio..."
@@ -71,7 +61,7 @@ if pactl info > /dev/null 2>&1; then
     pactl list short sinks 2>/dev/null || echo "    (none)"
     echo "  Sources:"
     pactl list short sources 2>/dev/null || echo "    (none)"
-    echo "  Modules:"
+    echo "  Loaded modules:"
     pactl list short modules 2>/dev/null || echo "    (none)"
 else
     echo "WARNING: PulseAudio not responding, continuing..."
@@ -81,7 +71,6 @@ fi
 
 # ── Global environment for TS3 Client and Bot ──
 export DISPLAY=:99
-export PULSE_SERVER=unix:/tmp/pulse-native
 # Chromium WebEngine cannot run sandboxed as root in Docker
 export QTWEBENGINE_CHROMIUM_FLAGS="--no-sandbox --disable-gpu"
 export CHROME_FLAGS="--no-sandbox --disable-gpu"
@@ -101,28 +90,27 @@ fi
 
 cd /opt/ts3client
 
-# Find TS3 client binary (try multiple patterns)
+# Find TS3 client binary
+# Priority: ts3client_runscript.sh > ts3client_linux_amd64 > fallback search
+# The runscript.sh wrapper sets LD_LIBRARY_PATH correctly for the TS3 client's
+# bundled Qt libraries, which is essential for finding shared libs.
 TS3BIN=""
-# Try exact binary name first
-for candidate in "ts3client_linux_amd64" "ts3client_linux.amd64" "ts3client_runscript.sh" "TeamSpeak3-Client-linux_amd64"; do
+for candidate in "ts3client_runscript.sh" "ts3client_linux_amd64" "ts3client_linux.amd64"; do
     if [ -f "$candidate" ]; then
         TS3BIN="$candidate"
         break
     fi
 done
 
-# Fallback: find any file (not just executable) with ts3/teamspeak in name
+# Fallback: find any file with ts3/teamspeak in name
 if [ -z "$TS3BIN" ]; then
-    TS3BIN=$(find . -maxdepth 3 -type f \( -iname "*ts3*" -o -iname "*teamspeak*" \) 2>/dev/null | head -1)
+    TS3BIN=$(find . -maxdepth 3 -type f \( -iname "*ts3*runscript*" -o -iname "*ts3client*" \) 2>/dev/null | head -1)
 fi
 
-# Fallback: use 'file' to detect ELF binaries
+# Fallback: use 'file' to detect ELF binaries or shell scripts
 if [ -z "$TS3BIN" ]; then
-    echo "Searching for ELF executables in /opt/ts3client..."
-    TS3BIN=$(find . -maxdepth 3 -type f -exec file {} \; 2>/dev/null \
-        | grep -i "ELF.*executable" \
-        | head -1 \
-        | cut -d: -f1)
+    echo "Searching for executables/scripts in /opt/ts3client..."
+    TS3BIN=$(find . -maxdepth 3 -type f \( -name "ts3*" -o -name "TeamSpeak*" \) 2>/dev/null | head -1)
 fi
 
 # Last resort: list ALL files for debugging
@@ -131,7 +119,7 @@ if [ -z "$TS3BIN" ]; then
     find /opt/ts3client -maxdepth 1 -type f | head -30
     echo ""
     echo "DEBUG: All regular files in /opt/ts3client (maxdepth 3, non-.so):"
-    find /opt/ts3client -maxdepth 3 -type f ! -name "*.so" | head -30
+    find /opt/ts3client -maxdepth 3 -type f ! -name "*.so" ! -name "*.so.*" | head -30
 fi
 
 if [ -n "$TS3BIN" ]; then
@@ -139,7 +127,8 @@ if [ -n "$TS3BIN" ]; then
     chmod +x "$TS3BIN"
 
     # Pre-flight check: verify all shared libraries are available
-    if command -v ldd > /dev/null 2>&1; then
+    # Only run ldd on ELF binaries, not shell scripts
+    if command -v ldd > /dev/null 2>&1 && file "./$TS3BIN" | grep -q "ELF"; then
         MISSING=$(ldd "./$TS3BIN" 2>/dev/null | grep "not found" || true)
         if [ -n "$MISSING" ]; then
             echo "ERROR: TS3 client has missing shared libraries:"
@@ -150,30 +139,49 @@ if [ -n "$TS3BIN" ]; then
         fi
     fi
 
-    # Launch with QT_DEBUG_PLUGINS for xcb diagnosis
-    QT_DEBUG_PLUGINS=1 ./"$TS3BIN" > /data/logs/ts3client.log 2>&1 &
+    # Build the ts3:// connection URL to force auto-connect on startup.
+    # Without this, the TS3 client starts but does NOT connect to any server,
+    # because bookmarks are only a GUI convenience and don't trigger auto-connect
+    # in headless mode.
+    TS3_HOST="${TS3_HOST:-localhost}"
+    TS3_VOICE_PORT="${TS3_VOICE_PORT:-9987}"
+    TS3_NICKNAME="${TS3_NICKNAME:-MusicBot}"
+    CONNECT_URL="ts3://${TS3_HOST}:${TS3_VOICE_PORT}?nickname=${TS3_NICKNAME}"
+    echo "TS3 connection URL: $CONNECT_URL"
+
+    # Launch TS3 client with the connection URL
+    # QT_DEBUG_PLUGINS=1 helps diagnose xcb/platform plugin issues
+    QT_DEBUG_PLUGINS=1 ./"$TS3BIN" "$CONNECT_URL" > /data/logs/ts3client.log 2>&1 &
     TS3_PID=$!
-    sleep 3
+    echo "TS3 Client launching (PID: $TS3_PID)..."
+
+    # Wait longer for TS3 client to initialize, load identity, and connect
+    sleep 5
 
     # Check if the process is still alive
     if kill -0 "$TS3_PID" 2>/dev/null; then
-        echo "TS3 Client started successfully (PID: $TS3_PID)"
+        echo "TS3 Client is running (PID: $TS3_PID)"
+        # Show recent log output for diagnostics
+        echo "--- TS3 Client log (last 10 lines) ---"
+        tail -10 /data/logs/ts3client.log 2>/dev/null || echo "  (no log output yet)"
+        echo "--- End of TS3 Client log ---"
     else
-        echo "ERROR: TS3 Client exited immediately. Last output:"
-        tail -20 /data/logs/ts3client.log 2>/dev/null || echo "  (no log output)"
+        echo "ERROR: TS3 Client exited immediately. Full output:"
+        cat /data/logs/ts3client.log 2>/dev/null || echo "  (no log output)"
+        echo ""
         echo "Bot will continue without TS3 Client (ServerQuery only mode)"
+        echo "Audio playback to TS3 channels will NOT work."
     fi
 else
-    echo "WARNING: Could not find TS3 client binary"
+    echo "ERROR: Could not find TS3 client binary in /opt/ts3client"
     echo "All files in /opt/ts3client root:"
     ls -la /opt/ts3client/
     echo ""
     echo "Subdirectories:"
     find /opt/ts3client -maxdepth 1 -type d
     echo ""
-    echo "Checking /opt/ts3client/bin/ if it exists:"
-    ls -la /opt/ts3client/bin/ 2>/dev/null || echo "  No bin/ directory"
     echo "Bot will start without TS3 Client (ServerQuery only mode)"
+    echo "Audio playback to TS3 channels will NOT work."
 fi
 
 # ── Start Python Bot ─────────────────────────────

@@ -63,6 +63,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xdotool \
     sqlite3 \
     dbus \
+    openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # ── OpenSSL 1.1 for TS3 Client (built against OpenSSL 1.x) ──

@@ -15,5 +15,8 @@ load-module module-native-protocol-unix socket=/tmp/pulse-native auth-anonymous=
 load-module module-always-sink
 load-module module-rescue-streams
 
+# Ensure a default source always exists (fallback if null sink monitor fails)
+load-module module-always-source
+
 # Never suspend (important for Docker)
 load-module module-suspend-on-idle timeout=999999
