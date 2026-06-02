@@ -16,16 +16,14 @@ import sys
 
 
 def _init_identity(cursor: sqlite3.Cursor) -> None:
-    """Ensure the identities table exists.
+    """Ensure the identities table exists and generate an identity if needed.
 
-    IMPORTANT: We do NOT pre-generate an identity here.  The TS3 Client uses a
-    proprietary identity encoding that is NOT compatible with standard PEM keys.
-    Storing a raw PEM key causes the client to silently fail authentication.
+    The TS3 Client requires an ECDSA identity (on P-256 curve) stored in a
+    proprietary obfuscated format.  Without a valid identity the client
+    cannot connect to any server.
 
-    Instead, we let the TS3 Client generate its own identity on first launch,
-    which guarantees the correct format.  The ``ts3://`` connection URL passed
-    on the command line triggers the client to connect (and generate an
-    identity if needed).
+    We generate the identity here using the same algorithm as TS3AudioBot
+    (TsCrypt.GenerateNewIdentity) to ensure the correct encoding.
     """
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS identities (
@@ -40,8 +38,24 @@ def _init_identity(cursor: sqlite3.Cursor) -> None:
     count = cursor.fetchone()[0]
     if count > 0:
         print(f"  Identity already exists ({count} found), TS3 Client will use it")
-    else:
-        print("  No identity yet -- TS3 Client will generate one on first launch")
+        return
+
+    print("  No identity found -- generating new ECDSA identity...")
+    try:
+        from docker.ts3client.generate_identity import generate_identity
+    except ImportError:
+        # Fallback for when running inside container with different path
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+        from generate_identity import generate_identity
+
+    identity_str, client_uid, key_offset = generate_identity(target_level=8)
+    cursor.execute(
+        "INSERT INTO identities (key_blob, nickname) VALUES (?, ?)",
+        (identity_str, ""),
+    )
+    print(f"  Generated identity: {identity_str[:30]}...")
+    print(f"  Client UID: {client_uid}")
+    print(f"  Key offset: {key_offset}")
 
 
 def _ensure_settings_table(cursor: sqlite3.Cursor) -> None:

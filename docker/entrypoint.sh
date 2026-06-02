@@ -351,8 +351,8 @@ for attempt in range(20):
             resp = sock.recv(4096).decode(errors="replace").strip()
             print(f"  Auth response: {resp}")
 
-        # Connect to server
-        sock.sendall(f"connect ip={host} port={port} nickname={nickname}\n".encode())
+        # Connect to server (ClientQuery uses 'address' not 'ip')
+        sock.sendall(f"connect address={host}:{port} nickname={nickname}\n".encode())
         time.sleep(5)
         resp = sock.recv(4096).decode(errors="replace").strip()
         print(f"  Connect response: {resp}")
