@@ -57,6 +57,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxslt1.1 \
     libatomic1 \
     libxcb-xinput0 \
+    # Window manager (required for xdotool to activate/focus windows)
+    openbox \
     # Utilities
     wget \
     bzip2 \

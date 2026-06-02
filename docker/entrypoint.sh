@@ -38,6 +38,12 @@ XVFB_PID=$!
 sleep 1
 echo "Xvfb started (PID: $XVFB_PID)"
 
+# ── Start Window Manager (required for xdotool focus/activate) ──
+export DISPLAY=:99
+openbox &
+sleep 0.5
+echo "Openbox window manager started"
+
 # ── Start PulseAudio (user mode, not system mode) ──────
 echo "Starting PulseAudio..."
 # Use user mode (--start without --system) to avoid permission issues
@@ -194,7 +200,7 @@ if [ -n "$TS3BIN" ]; then
     # settings-based pre-acceptance, use xdotool to auto-dismiss it.
     # IMPORTANT: The TS3 license dialog requires scrolling the license
     # text to the bottom before the "Agree" button becomes clickable.
-    # Simply pressing Enter won't work because the button is disabled.
+    # Openbox WM is required for xdotool windowactivate to work.
     echo "Checking for blocking license dialog..."
     for attempt in 1 2 3 4 5 6 7 8 9 10; do
         WINDOW=$(xdotool search --name "License" 2>/dev/null | head -1 || true)
@@ -209,55 +215,57 @@ if [ -n "$TS3BIN" ]; then
 
         echo "  License dialog detected (attempt $attempt, window: $WINDOW)"
 
-        # Activate and focus the dialog
+        # Get dialog geometry to calculate button position
+        GEO=$(xdotool getwindowgeometry --shell "$WINDOW" 2>/dev/null)
+        eval "$GEO"
+        # Defaults if geometry fails (TS3 license dialog is typically 740x700)
+        W=${WIDTH:-740}
+        H=${HEIGHT:-700}
+        echo "  Dialog size: ${W}x${H}"
+
+        # Activate the dialog (requires window manager like openbox)
         xdotool windowactivate --sync "$WINDOW" 2>/dev/null || true
         sleep 0.3
 
-        # Scroll the license text to the bottom to enable the Agree button.
-        # Use End key (jumps to end of text) and repeated Page Down as fallback.
-        xdotool key End 2>/dev/null || true
-        sleep 0.2
-        for i in $(seq 1 30); do
-            xdotool key Page_Down 2>/dev/null || true
-        done
-        sleep 0.3
-        # Also try mouse wheel scroll down inside the dialog
-        GEO=$(xdotool getwindowgeometry --shell "$WINDOW" 2>/dev/null)
-        eval "$GEO"
-        CX=$((WIDTH / 2))
-        CY=$((HEIGHT / 2))
+        # Step 1: Click in the center of the dialog to focus the text area
+        CX=$((W / 2))
+        CY=$((H / 2))
         xdotool mousemove --window "$WINDOW" "$CX" "$CY" 2>/dev/null || true
-        for i in $(seq 1 50); do
-            xdotool click 5 2>/dev/null || true  # scroll wheel down
-        done
-        sleep 0.5
-
-        # Now click the Agree button.
-        # Strategy 1: Look for a child window named "Agree"
-        AGREE_WIN=$(xdotool search --onlyvisible --name "Agree" 2>/dev/null | head -1 || true)
-        if [ -n "$AGREE_WIN" ]; then
-            echo "  Found Agree button window ($AGREE_WIN), clicking..."
-            xdotool windowactivate --sync "$AGREE_WIN" 2>/dev/null || true
-            sleep 0.2
-            xdotool key Return 2>/dev/null || true
-        fi
-
-        # Strategy 2: Click at estimated button position (bottom-right area)
-        echo "  Clicking at estimated Agree button position..."
-        BTN_X=$((WIDTH - 100))
-        BTN_Y=$((HEIGHT - 35))
-        xdotool mousemove --window "$WINDOW" "$BTN_X" "$BTN_Y" 2>/dev/null || true
         xdotool click 1 2>/dev/null || true
         sleep 0.3
 
-        # Strategy 3: Tab to the button and press Enter
+        # Step 2: Scroll to bottom of license text to enable Agree button
+        echo "  Scrolling license text to bottom..."
+        xdotool key End 2>/dev/null || true
+        sleep 0.2
+        for i in $(seq 1 40); do
+            xdotool key Page_Down 2>/dev/null || true
+        done
+        sleep 0.3
+        # Also use mouse wheel scroll
+        xdotool mousemove --window "$WINDOW" "$CX" "$CY" 2>/dev/null || true
+        for i in $(seq 1 80); do
+            xdotool click 5 2>/dev/null || true
+        done
+        sleep 0.5
+
+        # Step 3: Click the Agree button (bottom-right area of dialog)
+        # Qt dialog button layout: Agree/OK is typically on the right
+        # Button is ~80-100px wide, ~30px tall, ~10-20px from bottom/right
+        echo "  Clicking Agree button..."
+        BTN_X=$((W - 80))
+        BTN_Y=$((H - 30))
+        xdotool mousemove --window "$WINDOW" "$BTN_X" "$BTN_Y" 2>/dev/null || true
+        xdotool click 1 2>/dev/null || true
+        sleep 1
+
+        # Step 4: Also try Tab + Enter as backup
         xdotool windowactivate --sync "$WINDOW" 2>/dev/null || true
         for i in $(seq 1 5); do
             xdotool key Tab 2>/dev/null || true
+            sleep 0.1
         done
-        sleep 0.2
         xdotool key Return 2>/dev/null || true
-
         sleep 2
 
         # Check if dialog is gone
@@ -265,7 +273,28 @@ if [ -n "$TS3BIN" ]; then
             echo "  License dialog dismissed!"
             break
         fi
-        echo "  Dialog still present, retrying..."
+
+        # Step 5: Brute-force click grid in the button area
+        echo "  Dialog still present, trying grid click in button area..."
+        for bx in $((W-60)) $((W-100)) $((W-140)) $((W-180)); do
+            for by in $((H-25)) $((H-40)) $((H-55)) $((H-70)); do
+                xdotool mousemove --window "$WINDOW" "$bx" "$by" 2>/dev/null || true
+                xdotool click 1 2>/dev/null || true
+                sleep 0.3
+                if ! xdotool search --name "License" > /dev/null 2>&1; then
+                    echo "  Dismissed by clicking at ($bx, $by)!"
+                    break 2
+                fi
+            done
+        done
+
+        # Final check
+        if xdotool search --name "License" > /dev/null 2>&1; then
+            echo "  WARNING: Could not dismiss license dialog on attempt $attempt"
+        else
+            echo "  License dialog dismissed!"
+            break
+        fi
     done
 
     # Wait for TS3 client to finish connecting
