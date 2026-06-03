@@ -6,7 +6,6 @@
 - [controller.py](file://bot/core/audio/controller.py)
 - [volume.py](file://bot/core/audio/volume.py)
 - [music.py](file://bot/core/commands/handlers/music.py)
-- [ytdlp.py](file://bot/services/netease/ytdlp.py)
 - [app.py](file://bot/app.py)
 - [config.py](file://bot/config.py)
 - [config.yaml](file://config/config.yaml)
@@ -14,16 +13,15 @@
 - [Dockerfile](file://Dockerfile)
 - [entrypoint.sh](file://docker/entrypoint.sh)
 - [default.pa](file://docker/pulseaudio/default.pa)
-- [init_identity.py](file://docker/ts3client/init_identity.py)
 </cite>
 
 ## 更新摘要
 **变更内容**
-- **双sink架构实现**：从单sink架构升级为双sink架构，FFmpeg输出从`ts3bot_sink`迁移到`ts3bot_music`，实现真正的音频隔离
-- **音频滤镜链参数优化**：动态音频归一化滤镜参数从`f=150:g=15:p=0.95`优化为`f=500:g=15:p=0.9`，显著改善音频质量
-- **反馈循环完全消除**：通过双sink架构彻底解决音频反馈循环问题，确保播放质量
-- **增强的音频质量控制**：500ms分析窗口提供更平滑的音频处理，90%峰值目标避免削波
-- **改进的音频处理算法**：更长的分析窗口减少音频泵感，更高的峰值目标提供更好的动态范围
+- **音频设置管理增强**：新增AudioConfig配置模型，支持pulse_sink_name、default_volume、fade_duration_ms等参数的集中管理
+- **配置系统完善**：通过BotConfig统一管理音频配置，支持环境变量插值和默认值设置
+- **错误处理机制优化**：改进stderr行缓冲机制，增强错误诊断能力
+- **双sink架构配置**：完善双sink架构的配置管理，确保音频隔离和反馈循环消除
+- **音频质量提升**：移除dynaudnorm滤镜，简化音频处理链路，解决音量泵感问题
 
 ## 目录
 1. [简介](#简介)
@@ -32,28 +30,30 @@
 4. [架构总览](#架构总览)
 5. [详细组件分析](#详细组件分析)
 6. [双sink架构详解](#双sink架构详解)
-7. [依赖关系分析](#依赖关系分析)
-8. [性能考量](#性能考量)
-9. [故障排除指南](#故障排除指南)
-10. [结论](#结论)
-11. [附录](#附录)
+7. [音频配置管理系统](#音频配置管理系统)
+8. [依赖关系分析](#依赖关系分析)
+9. [性能考量](#性能考量)
+10. [故障排除指南](#故障排除指南)
+11. [结论](#结论)
+12. [附录](#附录)
 
 ## 简介
 本技术文档聚焦于FFmpeg集成模块，系统性阐述 FFmpegProcess 类的架构设计与实现原理，覆盖以下关键主题：
 - **双sink架构支持**：实现真正的音频隔离，FFmpeg输出到`ts3bot_music`，TS3客户端从其监控器捕获
-- **优化的音频滤镜链**：动态音频归一化滤镜参数从`f=150:g=15:p=0.95`优化为`f=500:g=15:p=0.9`
-- **反馈循环消除**：通过双sink架构完全解决音频回环问题
+- **简化的音频滤镜链**：移除动态音频归一化滤镜，音频处理回归到基础音量控制
+- **音量泵感问题解决**：通过移除dynaudnorm滤镜彻底解决音量泵感和频率不平衡问题
+- **增强的音频质量控制**：提供更自然的音频处理，避免过度压缩和音频失真
+- **反馈循环完全消除**：通过双sink架构彻底解决音频反馈循环问题，确保播放质量
 - **增强的进程管理**：新增进度解析能力，支持实时播放进度监控和提前退出检测
 - **智能源类型检测**：根据URL类型自动应用相应的FFmpeg参数配置，HTTP流启用网络重连，本地文件直接播放
 - **跨平台FFmpeg集成**：支持Linux PulseAudio和macOS AudioToolbox的自动检测与配置
 - **PULSE_SERVER环境变量优化**：改进PulseAudio连接配置，使用稳定的本地套接字连接
 - **改进的PulseAudio检测逻辑**：增强的服务器可用性检测，支持Unix socket连接测试
 - **增强的错误处理机制**：新增stderr行缓冲机制，提供详细的故障诊断信息
+- **音频配置管理系统**：通过AudioConfig模型统一管理音频设置，支持环境变量插值
 - **控制台输出优化**：移除verbose日志输出，减少控制台冗余信息，保持关键调试信息
 - **性能优化**：移除verbose日志输出，减少I/O开销和内存占用
 - **内存管理优化**：进度解析不计入stderr缓冲区，避免内存泄漏
-- **动态音频归一化**：新增dynaudnorm滤镜链，提供500ms分析窗口、高斯平滑和90%峰值目标的音频标准化功能
-- **音量调整与动态归一化双重滤镜链**：音频处理从单一音量调整扩展为音量调整+动态归一化的双重处理
 - **FFmpeg 进程生命周期管理**：启动、暂停/恢复、优雅停止与强制终止
 - **异步机制**：基于 asyncio 的子进程与标准错误流监控
 - **回调系统**：EOF 与错误事件的处理流程
@@ -72,19 +72,20 @@ FF["FFmpegProcess<br/>bot/core/audio/ffmpeg.py"]
 AC["AudioController<br/>bot/core/audio/controller.py"]
 VC["VolumeController<br/>bot/core/audio/volume.py"]
 end
+subgraph "配置层"
+CFG["BotConfig<br/>bot/config.py"]
+ACFG["AudioConfig<br/>bot/config.py"]
+end
 subgraph "业务层"
 MQ["MusicQueue<br/>bot/services/queue/manager.py"]
 CMD["音乐命令处理器<br/>bot/core/commands/handlers/music.py"]
 APP["BotApplication<br/>bot/app.py"]
-YT["YtDlpService<br/>bot/services/netease/ytdlp.py"]
 end
-subgraph "配置与环境"
-CFG["配置加载<br/>bot/config.py"]
+subgraph "环境配置"
 YAML["配置文件<br/>config/config.yaml"]
 DC["Docker配置<br/>docker-compose.yml"]
 ENV["环境变量<br/>PULSE_SERVER=unix:/tmp/pulse-native"]
 PA["PulseAudio配置<br/>docker/pulseaudio/default.pa"]
-TS3["TS3客户端配置<br/>docker/ts3client/init_identity.py"]
 END["入口脚本<br/>docker/entrypoint.sh"]
 DF["Dockerfile<br/>PULSE_SERVER配置"]
 end
@@ -95,21 +96,21 @@ APP --> AC
 APP --> MQ
 APP --> CMD
 FF --> CFG
+CFG --> ACFG
 CFG --> YAML
 APP --> DC
 DC --> ENV
 DC --> PA
-DC --> TS3
 DC --> END
 DC --> DF
-CMD --> YT
+CMD --> YAML
 ```
 
 **图表来源**
 - [ffmpeg.py:18-46](file://bot/core/audio/ffmpeg.py#L18-L46)
 - [controller.py:25-50](file://bot/core/audio/controller.py#L25-L50)
 - [volume.py:13-27](file://bot/core/audio/volume.py#L13-L27)
-- [config.py:125-160](file://bot/config.py#L125-L160)
+- [config.py:48-55](file://bot/config.py#L48-L55)
 - [config.yaml:14-21](file://config/config.yaml#L14-L21)
 - [docker-compose.yml:1-33](file://docker-compose.yml#L1-L33)
 - [entrypoint.sh:45-46](file://docker/entrypoint.sh#L45-L46)
@@ -117,9 +118,11 @@ CMD --> YT
 - [Dockerfile:94-96](file://Dockerfile#L94-L96)
 
 ## 核心组件
-- **FFmpegProcess**：封装单个 FFmpeg 子进程的创建、运行、监控与终止，负责将音频流解码并输出到平台特定的音频系统（Linux: PulseAudio, macOS: AudioToolbox）。**更新**：新增双sink架构支持，FFmpeg输出到`ts3bot_music`，优化动态音频归一化滤镜链参数。
+- **FFmpegProcess**：封装单个 FFmpeg 子进程的创建、运行、监控与终止，负责将音频流解码并输出到平台特定的音频系统（Linux: PulseAudio, macOS: AudioToolbox）。**更新**：音频滤镜链已简化为单一音量滤镜，移除了动态音频归一化功能。
 - **AudioController**：高层控制器，协调 FFmpeg 生命周期、音量控制与状态机，并向应用层发出播放完成/错误事件。
 - **VolumeController**：双层音量控制（FFmpeg 增益 + 平台特定音量控制），提供平滑淡入淡出过渡。
+- **AudioConfig**：音频配置模型，统一管理pulse_sink_name、default_volume、fade_duration_ms等音频设置参数。
+- **BotConfig**：配置聚合模型，包含音频、TS3、网易云、聊天、自动化、调度、Webhook、日志等配置项。
 - **MusicQueue**：多用户点歌队列，支持跳过投票、重复模式与历史记录。
 - **BotApplication**：应用编排者，注册命令、事件与后台服务，驱动播放流程并在 EOF/错误时自动播放下一首。
 - **YtDlpService**：yt-dlp集成服务，负责从各种平台提取音频URL和下载音频文件。
@@ -128,7 +131,8 @@ CMD --> YT
 - [ffmpeg.py:18-357](file://bot/core/audio/ffmpeg.py#L18-L357)
 - [controller.py:25-187](file://bot/core/audio/controller.py#L25-L187)
 - [volume.py:13-120](file://bot/core/audio/volume.py#L13-L120)
-- [ytdlp.py:44-302](file://bot/services/netease/ytdlp.py#L44-L302)
+- [config.py:48-55](file://bot/config.py#L48-L55)
+- [config.py:126-134](file://bot/config.py#L126-L134)
 - [app.py:27-356](file://bot/app.py#L27-L356)
 
 ## 架构总览
@@ -151,7 +155,7 @@ AC->>FF : "start(url, volume, expected_duration)"
 Note over FF : "智能源类型检测"
 FF->>FF : "HTTP流 : 添加重连参数"
 FF->>FF : "本地文件 : 直接播放"
-Note over FF : "音频滤镜链 : volume + dynaudnorm<br/>f=500 : g=15 : p=0.9"
+Note over FF : "音频滤镜链 : volume<br/>移除了dynaudnorm滤镜"
 FF-->>AC : "stderr监控(进度/EOF/错误)"
 AC-->>APP : "on_stopped/on_error"
 APP->>MQ : "next()"
@@ -170,8 +174,7 @@ APP->>AC : "play(next_url, next_duration)"
 - **职责与边界**
   - 创建并管理单个 FFmpeg 子进程，将其音频流解码后直接写入平台特定的音频系统。
   - 提供启动、停止、暂停/恢复、回调设置与进程监控能力。
-  - **更新**：新增双sink架构支持，FFmpeg输出到`ts3bot_music`而非旧的`ts3bot_sink`。
-  - **更新**：优化动态音频归一化滤镜链参数，分析窗口从150ms提升到500ms，峰值目标从0.95降低到0.9。
+  - **更新**：音频滤镜链已简化为单一音量滤镜，移除了动态音频归一化功能。
 - **关键属性与配置**
   - 可配置项：ffmpeg 可执行路径、PulseAudio 接收器名称（现为`ts3bot_music`）、采样率、声道数。
   - 运行时状态：进程对象、监控任务、回调函数（EOF/错误）、进度跟踪。
@@ -182,9 +185,9 @@ APP->>AC : "play(next_url, next_duration)"
   - **更新**：智能源类型检测：使用 `url.startswith(("http://", "https://"))` 判断是否为HTTP流。
   - **更新**：HTTP流自动应用重连参数：`-reconnect 1`、`-reconnect_streamed 1`、`-reconnect_delay_max 5`。
   - **更新**：本地文件直接播放，跳过网络重连参数，提升性能。
-  - **更新**：音频滤镜链重构：从单一音量调整扩展为音量调整+动态归一化的双重滤镜链
-  - **更新**：动态归一化滤镜参数优化：`f=500`（500ms分析窗口，更平滑的音频处理）、`g=15`（高斯平滑窗口，避免泵感）、`p=0.9`（峰值目标90%，更好的动态范围）
-  - 构建命令行参数：根据源类型选择性添加重连参数、输入源、音量滤镜、动态归一化滤镜、输出格式与目标接收器、采样率/声道、禁用交互等。
+  - **更新**：音频滤镜链简化：从双重滤镜链（音量调整+动态归一化）简化为单一音量滤镜
+  - **更新**：移除了动态归一化滤镜，解决了音量泵感和频率不平衡问题
+  - 构建命令行参数：根据源类型选择性添加重连参数、输入源、音量滤镜、输出格式与目标接收器、采样率/声道、禁用交互等。
   - **更新**：根据平台选择输出格式：Linux使用 `-f pulse`，macOS使用 `-f audiotoolbox`。
   - **更新**：Linux平台使用优化的PulseAudio服务器参数`-server unix:/tmp/pulse-native`，确保与PULSE_SERVER环境变量的一致性。
   - **更新**：精简启动参数，移除verbose相关配置，保留必要的启动参数如`-nostdin`、`-hide_banner`、`-y`。
@@ -344,7 +347,7 @@ AC->>FF : "start(url, volume, expected_duration)"
 Note over FF : "智能源类型检测"
 FF->>FF : "HTTP流 : 添加重连参数"
 FF->>FF : "本地文件 : 直接播放"
-Note over FF : "音频滤镜链 : volume + dynaudnorm<br/>f=500 : g=15 : p=0.9"
+Note over FF : "音频滤镜链 : volume<br/>移除了dynaudnorm滤镜"
 FF-->>AC : "EOF/错误回调"
 AC-->>APP : "on_stopped/on_error"
 APP->>MQ : "next()"
@@ -354,12 +357,10 @@ APP->>AC : "play(next_url, next_duration)"
 **图表来源**
 - [music.py:20-93](file://bot/core/commands/handlers/music.py#L20-L93)
 - [app.py:199-253](file://bot/app.py#L199-L253)
-- [ytdlp.py:66-100](file://bot/services/netease/ytdlp.py#L66-L100)
 
 **章节来源**
 - [music.py:17-260](file://bot/core/commands/handlers/music.py#L17-L260)
 - [app.py:199-253](file://bot/app.py#L199-L253)
-- [ytdlp.py:44-302](file://bot/services/netease/ytdlp.py#L44-L302)
 
 ## 双sink架构详解
 
@@ -436,29 +437,29 @@ APP->>AC : "play(next_url, next_duration)"
   - TS3客户端配置强制音频流向控制
   - Docker环境中的音频设备权限管理
 
-### 音频滤镜链参数优化
-**更新**：动态音频归一化滤镜链参数已优化，显著改善音频质量：
+### 简化的音频滤镜链
+**更新**：音频滤镜链已简化为单一音量滤镜，移除了动态音频归一化功能：
 
-- **分析窗口优化**
-  - **从150ms提升到500ms**：提供更平滑的音频分析能力
-  - 更长的分析窗口减少音频泵感现象
-  - 更好的动态范围控制，避免过度压缩
+- **滤镜链组成**
+  - **音量调整滤镜**：`volume={gain}` - 基于用户设置的音量百分比进行增益调整
+  - **移除了动态归一化滤镜**：解决了音量泵感和频率不平衡问题
 
-- **峰值目标调整**
-  - **从0.95降低到0.9**：提供更好的动态范围
-  - 90%峰值目标避免削波，同时保持音频亮度
-  - 更自然的音频动态表现
+- **音量泵感问题解决**
+  - **问题背景**：dynaudnorm滤镜导致音量泵感和频率不平衡
+  - **解决方案**：移除dynaudnorm滤镜，回归到基础音量控制
+  - **效果改善**：提供更自然的音频处理，避免过度压缩
 
 - **音频质量提升**
-  - **平滑处理**：500ms分析窗口提供更平滑的音频处理
-  - **动态范围**：90%峰值目标确保音频有足够的动态范围
-  - **保真度**：避免过度压缩，保持音频原始特性
-  - **稳定性**：更长的分析窗口提高音频处理的稳定性
+  - **自然处理**：单一音量滤镜提供更自然的音频处理
+  - **避免失真**：移除dynaudnorm滤镜避免音频失真和压缩
+  - **稳定性增强**：简化的滤镜链提供更稳定的音频处理
+  - **性能优化**：减少音频处理开销，提升系统性能
 
-- **处理算法优势**
-  - **响应性**：500ms分析窗口在响应性和平滑性间取得平衡
-  - **自然性**：90%峰值目标提供更自然的音频动态
-  - **兼容性**：优化的参数设置确保与Teamspeak客户端的最佳兼容性
+- **应用场景**
+  - **流媒体播放**：提供稳定的音量控制
+  - **本地文件播放**：确保音频质量一致性
+  - **多平台兼容**：适用于Linux和macOS平台
+  - **Teamspeak集成**：与双sink架构完美配合
 
 ### 配置系统支持
 - **配置模型**
@@ -488,11 +489,103 @@ APP->>AC : "play(next_url, next_duration)"
 - [default.pa:11-12](file://docker/pulseaudio/default.pa#L11-L12)
 - [Dockerfile:94-96](file://Dockerfile#L94-L96)
 
+## 音频配置管理系统
+
+### AudioConfig 配置模型
+**更新**：新增AudioConfig配置模型，提供统一的音频设置管理：
+
+- **配置参数**
+  - `pulse_sink_name`: PulseAudio接收器名称，默认为`"ts3bot_music"`
+  - `default_volume`: 默认音量，范围0-100，默认70
+  - `fade_duration_ms`: 淡入淡出持续时间，毫秒，默认500
+  - `ffmpeg_path`: FFmpeg可执行文件路径，None时自动检测
+  - `cache_dir`: 缓存目录，默认`"/data/cache"`
+  - `cache_max_mb`: 缓存最大大小，MB，默认500
+
+- **配置加载**
+  - 通过BotConfig统一管理，支持环境变量插值
+  - 配置文件config.yaml中定义默认值
+  - Docker环境中通过环境变量覆盖
+
+- **配置应用**
+  - AudioController初始化时读取配置
+  - FFmpegProcess使用配置的pulse_sink_name
+  - VolumeController使用default_volume和fade_duration_ms
+
+### BotConfig 配置聚合
+**更新**：BotConfig作为配置聚合模型，整合所有配置项：
+
+- **配置层次**
+  - ts3: TeamSpeak相关配置
+  - audio: 音频管道配置（新增AudioConfig）
+  - netease: 网易云音乐配置
+  - chat: AI聊天配置
+  - automation: 自动化配置
+  - scheduler: 调度配置
+  - webhook: Webhook配置
+  - logging: 日志配置
+
+- **配置加载流程**
+  - 从config/config.yaml加载原始配置
+  - 支持环境变量插值替换
+  - 验证配置有效性并应用默认值
+
+- **配置验证**
+  - 使用Pydantic模型进行类型验证
+  - 字段范围检查（如default_volume的0-100范围）
+  - 必需字段的默认值处理
+
+### 配置文件管理
+**更新**：config/config.yaml提供完整的音频配置定义：
+
+- **音频配置块**
+  - `pulse_sink_name`: "ts3bot_music"（双sink架构）
+  - `default_volume`: 70（适中的默认音量）
+  - `fade_duration_ms`: 500（平衡响应速度与平滑度）
+  - `ffmpeg_path`: null（自动检测）
+  - `cache_dir`: "/data/cache"
+  - `cache_max_mb`: 500
+
+- **环境变量支持**
+  - 所有配置项支持${VARIABLE_NAME}格式的环境变量插值
+  - Docker环境中通过docker-compose.yml传递环境变量
+  - 支持敏感信息的安全存储（如密码、API密钥）
+
+- **配置优先级**
+  - 环境变量 > 配置文件 > 默认值
+  - 动态配置更新支持（运行时重新加载）
+
+### 配置应用流程
+**更新**：配置系统的工作流程：
+
+```mermaid
+flowchart TD
+Start(["应用启动"]) --> LoadConfig["加载配置文件"]
+LoadConfig --> EnvInterpolate["环境变量插值"]
+EnvInterpolate --> Validate["配置验证"]
+Validate --> CreateAudio["创建AudioConfig"]
+CreateAudio --> InitAudioController["初始化AudioController"]
+InitAudioController --> SetCallbacks["设置回调函数"]
+SetCallbacks --> Ready(["配置就绪"])
+```
+
+**图表来源**
+- [config.py:137-161](file://bot/config.py#L137-L161)
+- [app.py:54-60](file://bot/app.py#L54-L60)
+
+**章节来源**
+- [config.py:48-55](file://bot/config.py#L48-L55)
+- [config.py:126-134](file://bot/config.py#L126-L134)
+- [config.py:137-161](file://bot/config.py#L137-L161)
+- [config.yaml:14-21](file://config/config.yaml#L14-L21)
+- [app.py:54-60](file://bot/app.py#L54-L60)
+
 ## 依赖关系分析
 - **内部依赖**
   - AudioController 依赖 FFmpegProcess 与 VolumeController。
   - BotApplication 依赖 AudioController、MusicQueue、命令处理器与外部服务。
   - 命令处理器依赖 BotApplication 的服务实例。
+  - **更新**：AudioController 依赖 AudioConfig 提供的配置参数。
 - **外部依赖**
   - FFmpeg 可执行程序与平台特定的音频系统。
   - Linux平台需要PulseAudio和pactl工具；macOS平台使用AudioToolbox。
@@ -502,22 +595,24 @@ APP->>AC : "play(next_url, next_duration)"
   - Docker环境提供跨平台部署支持。
   - **更新**：PULSE_SERVER环境变量提供统一的PulseAudio连接配置。
   - **更新**：双sink架构配置确保音频隔离和反馈循环消除。
+  - **更新**：AudioConfig模型提供统一的音频设置管理。
 
 ```mermaid
 graph LR
 AC["AudioController"] --> FF["FFmpegProcess"]
 AC --> VC["VolumeController"]
+AC --> ACFG["AudioConfig"]
 APP["BotApplication"] --> AC
 APP --> MQ["MusicQueue"]
 APP --> CMD["音乐命令处理器"]
 CMD --> NC["NeteaseAPIClient"]
 FF --> CFG["BotConfig"]
+CFG --> ACFG
 CFG --> YAML["config.yaml"]
 APP --> DC["Docker配置"]
 DC --> ENV["PULSE_SERVER环境变量"]
 DC --> PA["双sink架构配置"]
-CMD --> YT["YtDlpService"]
-YT --> FF
+CMD --> YAML
 ```
 
 **图表来源**
@@ -551,10 +646,10 @@ YT --> FF
   - **更新**：进度解析和提前退出检测功能，避免不必要的CPU开销。
   - **更新**：控制台输出优化，移除verbose日志，减少I/O开销。
   - **更新**：内存管理优化，stderr缓冲区大小限制为50行，进度解析不计入缓冲区。
-  - **更新**：动态音频归一化滤镜链优化，提供更好的音频处理性能。
+  - **更新**：简化的音频滤镜链提供更高效的音频处理能力。
+  - **更新**：移除dynaudnorm滤镜减少音频处理开销。
   - **更新**：双sink架构优化，提供更稳定的音频处理环境。
-  - **更新**：500ms分析窗口提供更好的音频处理稳定性。
-  - **更新**：90%峰值目标提供更好的动态范围控制。
+  - **更新**：AudioConfig配置管理优化，减少配置解析开销。
 - **网络重连优化**
   - **更新**：HTTP流自动应用重连参数，提升网络不稳定场景下的播放稳定性。
   - **更新**：本地文件直接播放，跳过网络重连参数，减少启动时间和系统开销。
@@ -565,12 +660,15 @@ YT --> FF
   - **更新**：进度日志按30秒间隔记录，避免频繁的日志写入。
   - **更新**：移除verbose日志输出，减少内存中日志条目的数量。
 - **音频处理性能**
-  - **更新**：动态归一化滤镜链经过优化，提供高效的音频处理能力。
-  - **更新**：双重滤镜链（音量调整+动态归一化）在保证音质的同时保持较低的处理开销。
-  - **更新**：500ms分析窗口提供更好的响应性，同时避免过度的计算开销。
-  - **更新**：90%峰值目标提供更好的动态范围，避免音频削波。
+  - **更新**：简化的音频滤镜链提供更高效的音频处理能力。
+  - **更新**：单一音量滤镜避免了dynaudnorm滤镜的处理开销。
+  - **更新**：移除了音量泵感问题，提供更自然的音频处理。
   - **更新**：双sink架构提供更稳定的音频处理环境。
   - **更新**：反馈循环消除提高系统稳定性。
+- **配置管理性能**
+  - **更新**：AudioConfig配置模型提供统一的配置管理，减少配置解析开销。
+  - **更新**：环境变量插值在启动时完成，避免运行时重复处理。
+  - **更新**：配置验证使用Pydantic模型，提供高效的类型检查。
 - **双sink架构性能**
   - **更新**：音频隔离减少音频干扰，提高播放质量。
   - **更新**：物理隔离避免音频回环，减少系统资源浪费。
@@ -584,15 +682,17 @@ YT --> FF
   - **更新**：确认平台检测结果正确（Darwin vs Linux）。
   - **更新**：检查PULSE_SERVER环境变量是否正确设置。
   - **更新**：确认精简后的启动参数配置正确。
-  - **更新**：验证动态音频归一化滤镜链参数配置是否正确。
+  - **更新**：检查简化的音频滤镜链配置是否正确。
   - **更新**：检查双sink架构配置是否正确加载。
+  - **更新**：验证AudioConfig配置是否正确应用。
 - **播放无声或音量异常**
   - 确认平台特定的音频系统存在且可用。
   - **更新**：macOS平台仅支持FFmpeg音量控制，检查FFmpeg volume滤镜设置。
   - **更新**：Linux平台检查pactl是否可用和PulseAudio配置。
   - **更新**：验证PULSE_SERVER环境变量与FFmpeg服务器参数的一致性。
-  - **更新**：检查动态音频归一化滤镜链是否正确加载。
+  - **更新**：检查简化的音频滤镜链是否正确加载。
   - **更新**：确认双sink架构中ts3bot_music sink是否正确配置。
+  - **更新**：验证AudioConfig中的default_volume设置。
 - **播放卡住或无法停止**
   - 确保监控任务未被意外取消；停止时等待进程退出，必要时强制终止。
 - **URL 提取失败**
@@ -602,84 +702,103 @@ YT --> FF
   - **更新**：确认Docker环境中的音频设备访问权限。
   - **更新**：验证PULSE_SERVER环境变量在容器内的正确传递。
   - **更新**：检查stderr缓冲区中的容器内音频错误信息。
-  - **更新**：验证动态音频归一化滤镜链在容器环境中的兼容性。
+  - **更新**：验证简化的音频滤镜链在容器环境中的兼容性。
   - **更新**：确认双sink架构在容器环境中的正确配置。
+  - **更新**：验证AudioConfig配置在容器环境中的应用。
 - **PulseAudio连接问题**
   - **更新**：检查PULSE_SERVER环境变量是否设置为`unix:/tmp/pulse-native`。
   - **更新**：验证PulseAudio本地协议模块是否正确加载。
   - **更新**：确认PulseAudio服务器套接字文件存在且可访问。
   - **更新**：使用增强的检测逻辑，测试Unix socket连接可用性。
   - **更新**：检查双sink架构中的PulseAudio模块加载。
+  - **更新**：验证AudioConfig中的pulse_sink_name配置。
 - **HTTP流播放不稳定**
   - **更新**：检查网络连接质量，确认重连参数已正确应用。
   - **更新**：验证HTTP流地址的有效性和可访问性。
   - **更新**：查看stderr日志中的网络重连相关信息。
-  - **更新**：确认动态音频归一化滤镜链在流媒体场景下的稳定性。
+  - **更新**：确认简化的音频滤镜链在流媒体场景下的稳定性。
   - **更新**：检查双sink架构对HTTP流的影响。
+  - **更新**：验证AudioConfig中的缓存设置。
 - **本地文件播放缓慢**
   - **更新**：确认文件路径有效且可访问。
   - **更新**：检查文件大小和格式，确认适合直接播放。
   - **更新**：验证本地文件播放时未意外应用网络重连参数。
-  - **更新**：检查动态音频归一化滤镜链对本地文件的影响。
+  - **更新**：检查简化的音频滤镜链对本地文件的影响。
   - **更新**：确认双sink架构对本地文件播放的影响。
+  - **更新**：验证AudioConfig中的ffmpeg_path设置。
 - **播放提前结束**
   - **更新**：检查提前退出检测逻辑，确认预期时长设置正确。
   - **更新**：查看进度日志，确认播放进度是否正常增长。
   - **更新**：检查网络连接和音频设备状态。
-  - **更新**：验证动态音频归一化滤镜链是否影响播放时长。
+  - **更新**：验证简化的音频滤镜链是否影响播放时长。
   - **更新**：检查双sink架构是否影响播放时长。
+  - **更新**：验证AudioConfig中的expected_duration设置。
 - **进度解析问题**
   - **更新**：确认FFmpeg版本支持time=格式的进度输出。
   - **更新**：检查stderr日志中是否有进度解析相关的错误信息。
   - **更新**：验证正则表达式是否正确匹配进度格式。
-  - **更新**：确认动态音频归一化滤镜链不影响进度解析。
+  - **更新**：确认简化的音频滤镜链不影响进度解析。
   - **更新**：检查双sink架构对进度解析的影响。
 - **控制台输出过多**
   - **更新**：确认已移除verbose日志输出配置。
   - **更新**：检查日志级别设置，确保非进度行记录为debug级别。
   - **更新**：验证精简后的启动参数配置。
-  - **更新**：确认动态音频归一化滤镜链的配置正确。
+  - **更新**：确认简化的音频滤镜链的配置正确。
   - **更新**：检查双sink架构的配置正确性。
+  - **更新**：验证AudioConfig配置的应用。
 - **错误诊断和日志分析**
   - **更新**：查看stderr缓冲区中的详细错误信息，包含完整的错误上下文。
   - **更新**：利用增强的错误处理机制，快速定位问题根因。
   - **更新**：检查PulseAudio日志文件，分析连接问题。
   - **更新**：确认日志级别分离机制正常工作。
-  - **更新**：验证动态音频归一化滤镜链的错误处理。
+  - **更新**：验证简化的音频滤镜链的错误处理。
   - **更新**：检查双sink架构的错误诊断信息。
+  - **更新**：验证AudioConfig配置的错误处理。
 - **性能问题**
   - **更新**：检查是否启用了verbose日志输出，移除后可显著减少I/O开销。
   - **更新**：验证stderr缓冲区大小设置，避免内存泄漏。
   - **更新**：确认进度解析频率设置合理，避免过度的日志写入。
-  - **更新**：检查动态音频归一化滤镜链的性能影响。
+  - **更新**：检查简化的音频滤镜链的性能影响。
   - **更新**：验证双sink架构的性能影响。
-  - **更新**：检查500ms分析窗口的性能开销。
-  - **更新**：检查90%峰值目标的处理开销。
+  - **更新**：检查移除dynaudnorm滤镜后的性能提升。
+  - **更新**：验证AudioConfig配置的性能影响。
 - **音频质量问题**
-  - **更新**：检查动态音频归一化滤镜链参数设置是否合理。
+  - **更新**：检查简化的音频滤镜链参数设置是否合理。
   - **更新**：验证音频响度一致性是否符合预期。
   - **更新**：检查是否存在音频削波或失真现象。
-  - **更新**：确认音量调整滤镜与动态归一化滤镜的协同效果。
+  - **更新**：确认音量调整滤镜的协同效果。
   - **更新**：检查双sink架构对音频质量的影响。
-  - **更新**：验证500ms分析窗口是否提供足够的音频平滑性。
-  - **更新**：检查90%峰值目标是否避免了音频削波。
+  - **更新**：验证移除dynaudnorm滤镜后的音频质量改善。
+  - **更新**：检查音量泵感问题是否已解决。
+  - **更新**：验证AudioConfig中的default_volume设置。
 - **反馈循环问题**
   - **更新**：确认双sink架构已正确配置和加载。
-  - **更新**：检查ts3bot_music和ts3bot_playback sink是否正常工作。
-  - **更新**：验证TS3客户端的音频设备配置是否正确。
-  - **更新**：检查PulseAudio模块是否正确加载双sink配置。
-  - **更新**：确认音频隔离是否有效，没有音频回环现象。
+  - **updated**：检查ts3bot_music和ts3bot_playback sink是否正常工作。
+  - **updated**：验证TS3客户端的音频设备配置是否正确。
+  - **updated**：检查PulseAudio模块是否正确加载双sink配置。
+  - **updated**：确认音频隔离是否有效，没有音频回环现象。
+  - **updated**：验证AudioConfig中的pulse_sink_name配置。
+- **配置相关问题**
+  - **updated**：检查config/config.yaml文件格式和语法。
+  - **updated**：验证环境变量插值是否正确应用。
+  - **updated**：确认AudioConfig配置参数的有效性。
+  - **updated**：检查配置加载顺序和优先级。
+  - **updated**：验证配置热重载功能（如果启用）。
 
 **章节来源**
 - [ffmpeg.py:223-328](file://bot/core/audio/ffmpeg.py#L223-L328)
 - [volume.py:77-109](file://bot/core/audio/volume.py#L77-L109)
 - [docker-compose.yml:9-26](file://docker-compose.yml#L9-L26)
 - [entrypoint.sh:45-46](file://docker/entrypoint.sh#L45-L46)
+- [config.py:48-55](file://bot/config.py#L48-L55)
+- [config.yaml:14-21](file://config/config.yaml#L14-L21)
 
 ## 结论
 本集成方案通过清晰的分层设计与异步化实现，提供了稳定可靠的跨平台音频播放能力。FFmpegProcess 负责底层进程与流处理，支持Linux PulseAudio和macOS AudioToolbox的自动检测与配置；AudioController 提供高层状态与事件管理；VolumeController 实现平台特定的平滑音量控制；BotApplication 则将各模块有机串联，形成完整的播放闭环。结合队列管理与命令系统，实现了从点歌到自动播放的完整体验。
 
-**更新**：本次重大更新显著增强了系统的音频处理能力和架构稳定性。双sink架构的引入实现了真正的音频隔离，FFmpeg输出到`ts3bot_music`，TS3客户端从其监控器捕获，彻底消除了音频反馈循环问题。动态音频归一化滤镜链参数从`f=150:g=15:p=0.95`优化为`f=500:g=15:p=0.9`，提供了更平滑的音频处理和更好的动态范围控制。500ms分析窗口显著改善了音频质量，90%峰值目标避免了音频削波，同时保持了足够的动态范围。这些改进不仅提升了音频播放的整体质量，还特别优化了与Teamspeak客户端的兼容性，确保安静音频片段不会被过滤掉。结合原有的智能源类型检测、网络重连优化、PULSE_SERVER环境变量配置等特性，形成了一个全面而强大的FFmpeg集成解决方案。通过移除verbose日志输出和优化控制台输出，显著减少了控制台冗余信息，同时保持了关键调试信息的完整性，提高了系统的可维护性和用户体验。双sink架构的实施为未来的音频处理功能奠定了坚实的基础。
+**更新**：本次重大更新显著增强了系统的音频处理能力和架构稳定性。双sink架构的引入实现了真正的音频隔离，FFmpeg输出到`ts3bot_music`，TS3客户端从其监控器捕获，彻底消除了音频反馈循环问题。最重要的是，音频滤镜链已简化为单一音量滤镜，移除了动态音频归一化功能，解决了音量泵感和频率不平衡问题。这一变更带来了更自然的音频处理效果，避免了过度压缩和音频失真，同时减少了音频处理开销，提升了系统性能。500ms分析窗口和90%峰值目标的动态音频归一化功能已被移除，简化了音频处理流程，使系统更加稳定可靠。结合原有的智能源类型检测、网络重连优化、PULSE_SERVER环境变量配置等特性，形成了一个全面而强大的FFmpeg集成解决方案。通过移除verbose日志输出和优化控制台输出，显著减少了控制台冗余信息，同时保持了关键调试信息的完整性，提高了系统的可维护性和用户体验。双sink架构的实施为未来的音频处理功能奠定了坚实的基础。
+
+**更新**：新增的音频配置管理系统进一步增强了系统的可维护性和可扩展性。AudioConfig模型提供了统一的音频设置管理，支持环境变量插值和默认值处理，使得配置更加灵活和安全。BotConfig配置聚合模型整合了所有配置项，提供了完整的配置生命周期管理。这些改进不仅提升了系统的稳定性，还为未来的功能扩展提供了良好的基础。
 
 ## 附录
 
@@ -690,10 +809,9 @@ YT --> FF
   - 提升网络不稳定场景下的鲁棒性
 - **音频滤镜链**
   - **更新**：音量调整滤镜：`volume={gain}` - 初始音量设置
-  - **更新**：动态归一化滤镜：`dynaudnorm=f=500:g=15:p=0.9` - 优化的音频响度标准化
-  - **更新**：双重滤镜链提供粗粒度音量控制和精细音频标准化的协同效果
-  - **更新**：500ms分析窗口提供更平滑的音频处理
-  - **更新**：90%峰值目标避免音频削波，保持动态范围
+  - **更新**：移除了动态归一化滤镜，解决了音量泵感和频率不平衡问题
+  - **更新**：简化的单一音量滤镜提供更自然的音频处理
+  - **更新**：避免了过度压缩和音频失真
 - **输出格式与目标**
   - **Linux**: 使用 pulse 输出格式与`ts3bot_music`接收器名称，优化服务器参数配置。
   - **macOS**: 使用 audiotoolbox 输出格式到系统默认音频设备。
@@ -713,8 +831,10 @@ YT --> FF
   - **更新**：移除verbose日志输出，减少I/O开销和内存占用
   - **更新**：精简启动参数，提升启动速度
   - **更新**：优化stderr处理机制，提高内存使用效率
-  - **更新**：动态音频归一化滤镜链优化，提供高效的音频处理能力
+  - **更新**：简化的音频滤镜链提供更高效的音频处理能力
+  - **更新**：移除dynaudnorm滤镜减少音频处理开销
   - **更新**：双sink架构优化，提供更稳定的音频处理环境
+  - **更新**：AudioConfig配置管理优化，提升配置加载性能
 
 **章节来源**
 - [ffmpeg.py:134-170](file://bot/core/audio/ffmpeg.py#L134-L170)
@@ -738,17 +858,23 @@ YT --> FF
   - **更新**：基于预期时长的提前退出检测机制。
   - **更新**：移除verbose日志，减少控制台输出。
 - **音频处理优化**
-  - **更新**：动态音频归一化滤镜链提供500ms分析窗口、高斯平滑和90%峰值目标
-  - **更新**：双重滤镜链（音量调整+动态归一化）提升音频处理质量
+  - **更新**：简化的音频滤镜链提供更自然的音频处理
+  - **更新**：移除了音量泵感问题，避免音频失真
+  - **更新**：单一音量滤镜提供更稳定的音频处理
   - **更新**：移除verbose日志输出，减少I/O开销
   - **更新**：优化stderr缓冲区管理，避免内存泄漏
   - **更新**：改进日志级别分离，减少控制台噪音
   - **更新**：双sink架构提供更稳定的音频处理环境
+  - **更新**：AudioConfig配置管理优化
 - **双sink架构优化**
   - **更新**：ts3bot_music sink提供高质量音频输出
   - **更新**：ts3bot_playback sink隔离其他用户音频
   - **更新**：完全消除音频反馈循环
   - **更新**：改善音频处理稳定性
+- **配置管理优化**
+  - **更新**：AudioConfig模型提供统一的配置管理
+  - **更新**：环境变量插值支持配置灵活性
+  - **更新**：配置验证确保设置有效性
 
 **章节来源**
 - [ffmpeg.py:19-21](file://bot/core/audio/ffmpeg.py#L19-L21)
@@ -762,8 +888,9 @@ YT --> FF
   - **更新**：实时进度监控，支持播放状态跟踪。
   - **更新**：日志级别分离，减少控制台冗余输出。
   - **更新**：性能优化，移除verbose日志输出，减少I/O开销。
-  - **更新**：动态音频归一化滤镜链监控，确保音频处理正常运行。
+  - **更新**：简化的音频滤镜链监控，确保音频处理正常运行。
   - **更新**：双sink架构监控，确保音频隔离有效。
+  - **更新**：AudioConfig配置监控，确保配置正确应用。
 - **清理**
   - 取消监控任务、优雅终止进程、超时强制终止、清理状态。
 - **恢复**
@@ -777,6 +904,7 @@ YT --> FF
 - **配置模型**
   - 包含 TS3、音频、网易云、聊天、自动化、调度、Webhook、日志等配置项。
   - **更新**：AudioConfig支持ffmpeg_path自动检测和pulse_sink_name配置（现为`ts3bot_music`）。
+  - **更新**：BotConfig统一管理所有配置项，支持环境变量插值。
 - **Docker 环境**
   - 提供跨平台部署支持，包含音频设备访问权限配置。
   - **更新**：Docker Compose配置支持不同平台的音频系统。
@@ -789,27 +917,35 @@ YT --> FF
   - **更新**：stderr行缓冲机制，提供详细的故障诊断信息。
   - **更新**：改进的PulseAudio检测逻辑，支持Unix socket连接测试。
   - **更新**：日志级别分离，减少控制台输出。
-  - **更新**：动态音频归一化滤镜链错误处理机制。
+  - **更新**：简化的音频滤镜链错误处理机制。
   - **更新**：双sink架构错误处理机制。
+  - **更新**：AudioConfig配置错误处理机制。
 - **进度监控配置**
   - **更新**：FFmpeg进度输出配置，支持time=格式解析。
   - **更新**：提前退出检测阈值配置，避免误判短音频。
   - **更新**：移除verbose日志输出，优化控制台显示。
-  - **更新**：动态音频归一化滤镜链进度监控。
+  - **更新**：简化的音频滤镜链进度监控。
   - **更新**：双sink架构进度监控。
+  - **更新**：AudioConfig配置进度监控。
 - **性能优化配置**
   - **更新**：精简启动参数，移除verbose日志输出
   - **更新**：优化stderr处理机制，提升内存使用效率
   - **更新**：改进日志级别分离，减少控制台噪音
-  - **更新**：动态音频归一化滤镜链性能优化配置
+  - **更新**：简化的音频滤镜链性能优化配置
+  - **更新**：移除dynaudnorm滤镜的性能优化配置
   - **更新**：双sink架构性能优化配置
-  - **更新**：500ms分析窗口性能优化
-  - **更新**：90%峰值目标性能优化
+  - **更新**：AudioConfig配置性能优化。
 - **双sink架构配置**
   - **更新**：PulseAudio双sink模块配置
-  - **更新**：TS3客户端音频设备配置
-  - **更新**：音频隔离验证配置
-  - **更新**：反馈循环消除配置
+  - **updated**：TS3客户端音频设备配置
+  - **updated**：音频隔离验证配置
+  - **updated**：反馈循环消除配置
+  - **updated**：AudioConfig双sink配置。
+- **音频配置管理**
+  - **updated**：AudioConfig模型定义和应用
+  - **updated**：BotConfig配置聚合和验证
+  - **updated**：配置文件格式和环境变量支持
+  - **updated**：配置热重载和动态更新支持
 
 **章节来源**
 - [config.py:125-160](file://bot/config.py#L125-L160)
@@ -819,36 +955,38 @@ YT --> FF
 - [Dockerfile:94-96](file://Dockerfile#L94-L96)
 - [default.pa:11-12](file://docker/pulseaudio/default.pa#L11-L12)
 
-### 动态音频归一化滤镜链详细说明
-**更新**：新增的动态音频归一化滤镜链是本次更新的核心改进，提供专业的音频处理能力：
+### 简化音频滤镜链详细说明
+**更新**：音频滤镜链已简化为单一音量滤镜，移除了动态音频归一化功能：
 
 - **滤镜链组成**
   - **音量调整滤镜**：`volume={gain}` - 基于用户设置的音量百分比进行增益调整
-  - **动态归一化滤镜**：`dynaudnorm=f=500:g=15:p=0.9` - 优化的音频响度标准化处理
+  - **移除了动态归一化滤镜**：解决了音量泵感和频率不平衡问题
 
-- **动态归一化参数详解**
-  - **分析窗口（f=500）**：500毫秒分析窗口，提供更平滑的音频分析能力
-  - **高斯平滑（g=15）**：15点高斯平滑窗口，有效避免音频泵感现象
-  - **峰值目标（p=0.9）**：90%峰值目标，提供更好的动态范围，避免音频削波
+- **音量泵感问题解决**
+  - **问题背景**：dynaudnorm滤镜导致音量泵感和频率不平衡
+  - **解决方案**：移除dynaudnorm滤镜，回归到基础音量控制
+  - **效果改善**：提供更自然的音频处理，避免过度压缩
 
 - **音频处理优势**
-  - **响度一致性**：确保音频在整个播放过程中的响度保持一致
-  - **语音激活优化**：防止安静音频片段被Teamspeak客户端的语音激活阈值过滤
-  - **音频保真度**：通过高斯平滑保持音频的自然特性，避免过度处理
-  - **性能效率**：双重滤镜链在保证音质的同时保持较低的处理开销
-  - **稳定性提升**：500ms分析窗口提供更好的音频处理稳定性
+  - **自然处理**：单一音量滤镜提供更自然的音频处理
+  - **避免失真**：移除dynaudnorm滤镜避免音频失真和压缩
+  - **稳定性增强**：简化的滤镜链提供更稳定的音频处理
+  - **性能优化**：减少音频处理开销，提升系统性能
+  - **音质提升**：避免音量泵感，提供更一致的音频体验
 
 - **应用场景**
-  - **流媒体播放**：优化HTTP流媒体的音频响度一致性
-  - **本地文件播放**：提升本地音频文件的播放质量
-  - **多平台兼容**：适用于Linux和macOS平台的音频播放
-  - **Teamspeak集成**：特别优化了与Teamspeak客户端的兼容性
+  - **流媒体播放**：提供稳定的音量控制
+  - **本地文件播放**：确保音频质量一致性
+  - **多平台兼容**：适用于Linux和macOS平台
+  - **Teamspeak集成**：与双sink架构完美配合
   - **双sink架构**：与双sink架构完美配合，提供高质量音频输出
+  - **配置管理**：与AudioConfig配置系统完美集成
 
 - **参数优化说明**
-  - **分析窗口从150ms提升到500ms**：提供更平滑的音频处理，减少音频泵感
-  - **峰值目标从0.95降低到0.9**：提供更好的动态范围，避免音频削波
+  - **移除了音量泵感**：解决了dynaudnorm滤镜的问题
   - **性能平衡**：在音频质量和平滑性之间取得最佳平衡
+  - **稳定性提升**：简化的滤镜链提供更稳定的音频处理
+  - **配置简化**：减少配置复杂度，提升系统可靠性
 
 **章节来源**
 - [ffmpeg.py:147-155](file://bot/core/audio/ffmpeg.py#L147-L155)
@@ -877,6 +1015,45 @@ YT --> FF
   - **系统稳定性**：提供稳定的音频处理环境
   - **兼容性增强**：与Teamspeak客户端完美兼容
 
+- **配置管理**
+  - **AudioConfig集成**：pulse_sink_name参数支持自定义sink名称
+  - **环境变量支持**：支持PULSE_SERVER等环境变量配置
+  - **动态配置**：支持运行时配置更新和热重载
+
 **章节来源**
 - [default.pa:1-34](file://docker/pulseaudio/default.pa#L1-L34)
-- [init_identity.py:177-212](file://docker/ts3client/init_identity.py#L177-L212)
+- [config.py:48-55](file://bot/config.py#L48-L55)
+- [config.yaml:14-21](file://config/config.yaml#L14-L21)
+
+### 音频配置管理系统详细说明
+**更新**：新增的音频配置管理系统提供了完整的配置管理能力：
+
+- **AudioConfig模型**
+  - **字段定义**：pulse_sink_name、default_volume、fade_duration_ms、ffmpeg_path等
+  - **类型验证**：使用Pydantic进行类型检查和范围验证
+  - **默认值处理**：提供合理的默认值和配置回退机制
+  - **环境变量插值**：支持${VARIABLE_NAME}格式的环境变量替换
+
+- **配置应用流程**
+  - **加载配置**：从config/config.yaml加载原始配置
+  - **环境变量处理**：应用环境变量插值替换
+  - **验证配置**：使用Pydantic模型验证配置有效性
+  - **应用配置**：将配置传递给各个组件使用
+
+- **配置管理优势**
+  - **统一管理**：集中管理所有音频相关配置
+  - **类型安全**：编译时类型检查确保配置正确性
+  - **运行时验证**：运行时配置验证防止无效配置
+  - **环境隔离**：支持不同环境的配置隔离和覆盖
+
+- **配置扩展性**
+  - **易于扩展**：新增配置项只需修改AudioConfig模型
+  - **向后兼容**：新增配置项提供默认值，不影响现有配置
+  - **配置热重载**：支持运行时配置更新和热重载
+  - **配置备份**：支持配置备份和恢复机制
+
+**章节来源**
+- [config.py:48-55](file://bot/config.py#L48-L55)
+- [config.py:137-161](file://bot/config.py#L137-L161)
+- [config.yaml:14-21](file://config/config.yaml#L14-L21)
+- [app.py:54-60](file://bot/app.py#L54-L60)
