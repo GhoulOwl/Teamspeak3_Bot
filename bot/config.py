@@ -58,6 +58,7 @@ class NeteaseConfig(BaseModel):
     api_base_url: str = "http://localhost:3000"
     search_limit: int = 10
     audio_quality: Literal["standard", "higher", "exhigh", "lossless"] = "exhigh"
+    cookie_file: str | None = None  # Path to Netscape cookie file for yt-dlp
 
 
 class ChatConfig(BaseModel):

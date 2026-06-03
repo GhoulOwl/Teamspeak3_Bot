@@ -127,11 +127,66 @@ docker compose down
 
 - **ts3**: TeamSpeak 3 连接配置（地址、端口、昵称等）
 - **audio**: 音频配置（音量、FFmpeg 路径、缓存目录）
-- **netease**: 网易云音乐配置（搜索限制、音质）
+- **netease**: 网易云音乐配置（搜索限制、音质、cookie 文件路径）
 - **chat**: AI 聊天配置（API、模型、温度等）
 - **automation**: 自动化功能（欢迎消息、跟随模式等）
 - **webhook**: Webhook 服务配置
 - **logging**: 日志配置
+
+### yt-dlp Cookie 配置
+
+部分平台（网易云音乐、Bilibili、YouTube 等）需要登录态才能获取高品质音频或绕过访问限制。可以通过配置 cookie 文件来解决：
+
+#### 1. 获取 Cookie 文件
+
+使用浏览器扩展导出 Netscape 格式的 cookie 文件：
+
+- Chrome/Edge: 安装 [Get cookies.txt LOCALLY](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc) 扩展
+- Firefox: 安装 [cookies.txt](https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/) 扩展
+
+操作步骤：
+1. 在浏览器中登录目标平台（网易云音乐 / Bilibili / YouTube）
+2. 使用扩展导出 cookie，保存为 `cookies.txt`（Netscape 格式）
+3. 将文件放到安全目录（如 `config/cookies.txt` 或 `/data/cookies.txt`）
+
+> **注意**: 一个 cookie 文件可以包含多个平台的 cookie，yt-dlp 会自动按域名匹配使用。
+
+#### 2. 配置 cookie 文件路径
+
+编辑 `config/config.yaml`：
+
+```yaml
+netease:
+  cookie_file: "/data/cookies.txt"  # 改为你的 cookie 文件实际路径
+```
+
+或使用环境变量插值：
+
+```yaml
+netease:
+  cookie_file: "${YTDLP_COOKIE_FILE}"
+```
+
+#### 3. Docker 部署时的 Cookie 配置
+
+将 cookie 文件挂载到容器中：
+
+```yaml
+# docker-compose.yml
+services:
+  ts3bot:
+    volumes:
+      - ./config/cookies.txt:/data/cookies.txt:ro
+```
+
+然后在 `config/config.yaml` 中设置：
+
+```yaml
+netease:
+  cookie_file: "/data/cookies.txt"
+```
+
+> **提示**: `cookie_file` 默认为 `null`（不使用 cookie）。网易云音乐免费歌曲通常不需要 cookie，但高品质音频或部分平台可能需要。Cookie 文件有过期时间，请定期更新。
 
 ## 可用命令
 
@@ -233,6 +288,17 @@ pytest
 - 检查 `.env` 中的 `TS3_HOST` 和 `TS3_PASSWORD` 是否正确
 - 确认 TS3 服务器的 ServerQuery 端口（默认 10011）可访问
 - 查看日志获取详细错误信息
+
+### 音乐播放失败 / 需要登录
+
+如果某些平台的音乐无法播放（如网易云灰色歌曲、Bilibili 大会员内容）：
+
+1. 在浏览器中登录对应平台
+2. 使用浏览器扩展导出 Netscape 格式的 cookie 文件
+3. 在 `config/config.yaml` 中配置 `netease.cookie_file` 指向该文件
+4. 重启 Bot
+
+> Cookie 文件会过期，如果之前正常但突然无法播放，请重新导出 cookie。
 
 ## 许可证
 

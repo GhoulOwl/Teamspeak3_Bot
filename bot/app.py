@@ -61,7 +61,7 @@ class BotApplication:
 
         self.music_queue = MusicQueue()
 
-        self.netease = NeteaseAPIClient()
+        self.netease = NeteaseAPIClient(cookie_file=self.config.netease.cookie_file)
 
         self.chat_service = ChatService(
             api_base_url=self.config.chat.api_base_url,

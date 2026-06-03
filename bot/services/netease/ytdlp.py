@@ -50,7 +50,7 @@ class YtDlpService:
     Supports Netease Cloud Music, YouTube, Bilibili, and many more platforms.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, cookie_file: str | None = None) -> None:
         self._base_opts: dict[str, Any] = {
             "quiet": True,
             "no_warnings": True,
@@ -64,6 +64,9 @@ class YtDlpService:
             # Extract flat playlist info (don't recurse into each song)
             "extract_flat": False,
         }
+        if cookie_file:
+            self._base_opts["cookiefile"] = cookie_file
+            logger.info("yt-dlp cookie file configured: %s", cookie_file)
 
     async def extract_audio(self, url: str) -> AudioInfo | None:
         """Extract a playable audio URL from any supported platform.

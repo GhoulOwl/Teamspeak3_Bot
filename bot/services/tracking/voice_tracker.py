@@ -118,7 +118,7 @@ class VoiceClientTracker:
 
         if voice_channel_id and voice_channel_id != sq_channel_id:
             logger.info(
-                "Periodic sync: voice client in channel %d, ServerQuery in %d - moving",
+                "Periodic sync: voice client in channel %d, ServerQuery in %d — moving",
                 voice_channel_id, sq_channel_id,
             )
             self._voice_channel_id = voice_channel_id
@@ -237,7 +237,99 @@ class VoiceClientTracker:
         except asyncio.CancelledError:
             return
         except Exception as e:
-            # Error 770 = "already member of channel" -- harmless
+            # Error 770 = "already member of channel" — harmless
+            if "770" in str(e):
+                logger.debug("ServerQuery already in channel %d", channel_id)
+            else:
+                logger.exception(
+                    "Failed to move ServerQuery to channel %d", channel_id,
+                )
+                return
+
+        # After moving (or if already there), register channel-level events.
+        # This is CRITICAL: clientmoved events require per-channel registration.
+        await self._register_channel_events(channel_id)
+
+    async def _register_channel_events(self, channel_id: int) -> None:
+        """Register for channel-level events (clientmoved, etc.).
+
+        TS3 ServerQuery requires ``event=channel id={cid}`` to receive
+        ``clientmoved`` notifications.  Without this, the tracker cannot
+        detect when the voice client is moved to another channel.
+        """
+        if channel_id == self._registered_channel_id:
+            return  # already registered for this channel
+
+        try:
+            await self._app.sq.send(
+                f"servernotifyregister event=channel id={channel_id}"
+            )
+            self._registered_channel_id = channel_id
+            logger.info(
+                "Registered channel events for channel %d", channel_id,
+            )
+        except Exception:
+            logger.debug(
+                "Failed to register channel events for %d (may already be registered)",
+                channel_id,
+            )
+                logger.info(
+                    "Voice client connected (clid=%d, channel=%d)",
+                    clid, cid,
+                )
+                await self._move_to_channel(cid)
+
+    async def _on_client_moved(self, event: SQEvent) -> None:
+        """Handle client moving between channels."""
+        moved = ClientMovedEvent.from_event(event)
+        sq_clid = self._app.sq.client_id
+
+        if moved.clid == sq_clid:
+            return  # ignore our own moves
+
+        # Check if the voice client moved (by clid or cldbid)
+        is_voice = (
+            moved.clid == self._voice_clid
+            or (self._voice_cldbid and moved.cldbid == self._voice_cldbid)
+        )
+        if not is_voice:
+            return
+
+        self._voice_clid = moved.clid
+        self._voice_channel_id = moved.target_channel_id
+        logger.info(
+            "Voice client moved to channel %d",
+            moved.target_channel_id,
+        )
+        await self._move_to_channel(moved.target_channel_id)
+
+    async def _move_to_channel(self, channel_id: int) -> None:
+        """Move the ServerQuery client to the given channel."""
+        if channel_id == 0:
+            return  # channel 0 is not a valid target
+
+        sq_clid = self._app.sq.client_id
+        if not sq_clid:
+            return
+
+        # Cancel any pending move to avoid conflicts
+        if self._move_task and not self._move_task.done():
+            self._move_task.cancel()
+
+        self._move_task = asyncio.create_task(
+            self._do_move(sq_clid, channel_id)
+        )
+
+    async def _do_move(self, clid: int, channel_id: int) -> None:
+        """Execute the move with a small debounce, then re-register channel events."""
+        try:
+            await asyncio.sleep(0.5)
+            await self._app.sq.client_move(clid, channel_id)
+            logger.info("ServerQuery moved to channel %d", channel_id)
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            # Error 770 = "already member of channel" — harmless
             if "770" in str(e):
                 logger.debug("ServerQuery already in channel %d", channel_id)
             else:

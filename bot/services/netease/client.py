@@ -29,9 +29,9 @@ class NeteaseAPIClient:
     each time since CDN links expire quickly.
     """
 
-    def __init__(self, api_base_url: str = "", quality: str = "exhigh") -> None:
+    def __init__(self, api_base_url: str = "", quality: str = "exhigh", cookie_file: str | None = None) -> None:
         # api_base_url kept for config compatibility, no longer used
-        self._ytdlp = YtDlpService()
+        self._ytdlp = YtDlpService(cookie_file=cookie_file)
         self._cache = TTLCache()
 
     async def close(self) -> None:
