@@ -23,7 +23,7 @@ audio:
 netease:
   search_limit: 10
   audio_quality: "exhigh"
-  cookie_file: null  # Path to Netscape format cookies.txt for yt-dlp (e.g., /data/cookies.txt)
+  cookie_file: "/opt/bot/config/cookies.txt"  # Path to Netscape format cookies.txt for yt-dlp
 
 # ── AI Chat ─────────────────────────────────────
 chat:
