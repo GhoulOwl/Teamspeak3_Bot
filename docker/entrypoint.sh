@@ -52,6 +52,18 @@ if [ -f /home/ts3bot/.ts3client/settings.db ]; then
          ('capture/device', 'ts3bot_music.monitor'), \
          ('playback/device', 'ts3bot_playback');" 2>/dev/null || true
     echo "  Audio devices migrated to dual-sink (ts3bot_music + ts3bot_playback)"
+
+    # ── Disable TS3 audio processing (harmful for music playback) ──
+    # These features are designed for voice communication and degrade music quality.
+    # Echo cancellation, noise suppression, AGC all compress/distort music signals.
+    sqlite3 /home/ts3bot/.ts3client/settings.db \
+        "INSERT OR REPLACE INTO settings (key, value) VALUES \
+         ('capture/echo_cancel', '0'), \
+         ('capture/echo_cancel_aggressive', '0'), \
+         ('capture/echo_suppression', '0'), \
+         ('capture/noise_suppression', '0'), \
+         ('capture/automatic_gain_control', '0');" 2>/dev/null || true
+    echo "  Audio processing disabled (echo cancel, noise suppression, AGC)"
 fi
 
 # ── Block TeamSpeak license/update/CDN servers ──────────────────

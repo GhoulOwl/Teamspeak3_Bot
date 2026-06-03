@@ -192,6 +192,21 @@ def init_settings():
         "capture/voiceactivation": "0",
         "capture/voiceactivation_level": "0",
         "capture/volume": "100",
+        # ── Disable ALL audio processing (designed for voice, harmful for music) ──
+        # Echo cancellation: removes echo from mic input, but compresses audio
+        # dynamics and can introduce artifacts when processing music signals.
+        "capture/echo_cancel": "0",
+        "capture/echo_cancel_aggressive": "0",
+        # Echo suppression: additional echo suppression layer, can truncate
+        # audio signals when it detects "echo" (which is actually the music).
+        "capture/echo_suppression": "0",
+        # Noise suppression: removes background noise but also removes
+        # music frequencies (especially high harmonics and subtle details).
+        "capture/noise_suppression": "0",
+        # Automatic gain control: adjusts volume automatically, compressing
+        # the dynamic range of music (quiet parts get boosted, loud parts
+        # get attenuated). This destroys music dynamics.
+        "capture/automatic_gain_control": "0",
         # Connection settings
         "connection/auto_reconnect": "1",
         # Start capturing on connect (critical: TS3 must transmit audio)
