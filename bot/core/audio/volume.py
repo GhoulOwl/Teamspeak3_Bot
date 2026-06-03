@@ -82,10 +82,15 @@ class VolumeController:
             logger.exception("Failed to set volume via pactl")
 
     async def refresh_sink_input(self) -> None:
-        """Find the current FFmpeg sink input ID.
+        """Find the current FFmpeg sink input ID and ensure correct routing.
 
         Called after starting a new FFmpeg process to locate its
         PulseAudio sink input for volume control.
+
+        PulseAudio may route FFmpeg's stream to the wrong sink (the default
+        sink) even when FFmpeg explicitly requests our music sink.  When this
+        happens we move the stream to the correct sink via ``pactl
+        move-sink-input`` so that the TS3 client can capture it.
         """
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -96,15 +101,43 @@ class VolumeController:
             stdout, _ = await proc.communicate()
             output = stdout.decode("utf-8", errors="replace")
 
-            # Parse sink input ID
-            # Format: "Sink Input #42"
+            # Step 1: Check if FFmpeg is already on the correct sink
             pattern = rf"Sink Input #(\d+).*?Sink:\s*{re.escape(self._pulse_sink)}"
             match = re.search(pattern, output, re.DOTALL)
             if match:
                 self._sink_input_id = match.group(1)
                 logger.debug("Found sink input ID: %s", self._sink_input_id)
-                # Apply current volume
                 await self._apply_volume(self._sink_input_id)
+                return
+
+            # Step 2: FFmpeg not on correct sink — find it by application name
+            # (Lavf* = libavformat = FFmpeg) and move to the correct sink
+            ffmpeg_pattern = (
+                r"Sink Input #(\d+).*?application\.name\s*=\s*\"Lavf[^\"]*\""
+            )
+            ff_match = re.search(ffmpeg_pattern, output, re.DOTALL)
+            if ff_match:
+                input_id = ff_match.group(1)
+                logger.info(
+                    "FFmpeg sink input #%s on wrong sink, moving to %s",
+                    input_id, self._pulse_sink,
+                )
+                move_proc = await asyncio.create_subprocess_exec(
+                    "pactl", "move-sink-input", input_id, self._pulse_sink,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await move_proc.communicate()
+                if move_proc.returncode == 0:
+                    self._sink_input_id = input_id
+                    logger.info("Moved FFmpeg sink input #%s to %s", input_id, self._pulse_sink)
+                    await self._apply_volume(self._sink_input_id)
+                else:
+                    logger.warning(
+                        "Failed to move sink input: %s",
+                        stderr.decode(errors="replace").strip(),
+                    )
+                    self._sink_input_id = None
             else:
                 logger.debug("Sink input not found for sink %s", self._pulse_sink)
                 self._sink_input_id = None
