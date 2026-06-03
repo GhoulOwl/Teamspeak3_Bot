@@ -11,8 +11,13 @@ load-module module-null-sink sink_name=ts3bot_music sink_properties=device.descr
 # Their voices go into this sink and are NOT captured by the bot
 load-module module-null-sink sink_name=ts3bot_playback sink_properties=device.description="TS3Bot_Playback" rate=48000 format=s16le channels=2
 
-# Set defaults (music sink for FFmpeg output, its monitor for TS3 capture)
-set-default-sink ts3bot_music
+# Set defaults:
+#   Default sink = ts3bot_playback (black hole — TS3 client sends other users'
+#   audio here; it is NOT captured, preventing echo).
+#   FFmpeg explicitly outputs to ts3bot_music via "-f pulse ts3bot_music" in
+#   ffmpeg.py, so it is NOT affected by this default sink setting.
+#   Default source = ts3bot_music.monitor (TS3 captures only FFmpeg music).
+set-default-sink ts3bot_playback
 set-default-source ts3bot_music.monitor
 
 # Local protocol for FFmpeg and TS3 client
