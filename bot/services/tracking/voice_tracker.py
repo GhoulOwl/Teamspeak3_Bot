@@ -174,7 +174,12 @@ class VoiceClientTracker:
             logger.info("ServerQuery moved to channel %d", channel_id)
         except asyncio.CancelledError:
             pass
-        except Exception:
-            logger.exception(
-                "Failed to move ServerQuery to channel %d", channel_id,
-            )
+        except Exception as e:
+            # Error 770 = "already member of channel" — harmless, we're
+            # already where we want to be.
+            if "770" in str(e):
+                logger.debug("ServerQuery already in channel %d", channel_id)
+            else:
+                logger.exception(
+                    "Failed to move ServerQuery to channel %d", channel_id,
+                )
