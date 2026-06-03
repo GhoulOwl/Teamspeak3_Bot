@@ -6,6 +6,13 @@ echo "=== TS3 Bot Container Starting ==="
 # ── Create runtime directories ───────────────────
 mkdir -p /data/cache /data/logs
 mkdir -p /home/ts3bot/.ts3client
+
+# ── Copy cookie file to writable /data/ if present ──
+# config/ is mounted read-only, but yt-dlp needs to write cookies back
+if [ -f /opt/bot/config/cookies.txt ] && [ ! -f /data/cookies.txt ]; then
+    cp /opt/bot/config/cookies.txt /data/cookies.txt
+    echo "Cookie file copied to /data/cookies.txt (writable)"
+fi
 # PulseAudio runtime directories
 mkdir -p /var/run/pulse
 mkdir -p /tmp/pulse-runtime
