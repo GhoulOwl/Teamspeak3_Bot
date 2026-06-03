@@ -20,6 +20,7 @@ from bot.services.chat.service import ChatService
 from bot.services.netease.client import NeteaseAPIClient
 from bot.services.queue.manager import MusicQueue
 from bot.services.scheduler.jobs import SchedulerService
+from bot.services.tracking.voice_tracker import VoiceClientTracker
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,13 @@ class BotApplication:
 
         self.scheduler = SchedulerService(app=self)
 
+        # Voice client tracker: keeps ServerQuery in the same channel
+        # as the TS3 voice client so commands work in any channel
+        self.voice_tracker = VoiceClientTracker(
+            app=self,
+            voice_nickname=self.config.ts3.nickname,
+        )
+
         # Webhook
         self._webhook_server = None
         self._webhook_task = None
@@ -158,6 +166,9 @@ class BotApplication:
         self.welcome_service.subscribe()
         self.group_assigner.subscribe()
         self.follow_mode.subscribe()
+
+        # Voice client tracker (subscribes to cliententerview/clientmoved)
+        self.voice_tracker.subscribe()
 
     async def _on_text_message(self, event: SQEvent) -> None:
         """Route text messages to the command system."""
@@ -303,6 +314,9 @@ class BotApplication:
 
         # Connect to ServerQuery
         await self.sq.start()
+
+        # Sync ServerQuery to voice client's channel (runs in background)
+        asyncio.create_task(self.voice_tracker.initial_sync())
 
         # Start scheduler
         self.scheduler.start()

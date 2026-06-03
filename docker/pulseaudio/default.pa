@@ -5,15 +5,11 @@
 # This prevents other users' voices from being echoed back through the bot.
 
 # Music sink: FFmpeg outputs here, TS3 capture reads from its monitor
-load-module module-null-sink sink_name=ts3bot_music \
-    sink_properties=device.description="TS3Bot_Music" \
-    rate=48000 format=s16le channels=2
+load-module module-null-sink sink_name=ts3bot_music sink_properties=device.description="TS3Bot_Music" rate=48000 format=s16le channels=2
 
 # Playback sink: TS3 client plays other users' audio here (black hole)
 # Their voices go into this sink and are NOT captured by the bot
-load-module module-null-sink sink_name=ts3bot_playback \
-    sink_properties=device.description="TS3Bot_Playback" \
-    rate=48000 format=s16le channels=2
+load-module module-null-sink sink_name=ts3bot_playback sink_properties=device.description="TS3Bot_Playback" rate=48000 format=s16le channels=2
 
 # Set defaults (music sink for FFmpeg output, its monitor for TS3 capture)
 set-default-sink ts3bot_music
