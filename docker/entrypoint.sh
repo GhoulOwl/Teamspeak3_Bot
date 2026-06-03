@@ -71,6 +71,19 @@ if [ -f /home/ts3bot/.ts3client/settings.db ]; then
          ('capture/noise_suppression', '0'), \
          ('capture/automatic_gain_control', '0');" 2>/dev/null || true
     echo "  Audio processing disabled (echo cancel, noise suppression, AGC)"
+
+    # ── Ensure voice activation is set to Always Activate ──
+    # capture/voiceactivation=0 means Always Activate (continuous transmission).
+    # capture/voiceactivation_level=0 ensures minimum threshold (no gating).
+    # capture/volume=100 ensures full input volume.
+    # These settings may be missing from older databases created before
+    # they were added to init_identity.py.
+    sqlite3 /home/ts3bot/.ts3client/settings.db \
+        "INSERT OR REPLACE INTO settings (key, value) VALUES \
+         ('capture/voiceactivation', '0'), \
+         ('capture/voiceactivation_level', '0'), \
+         ('capture/volume', '100');" 2>/dev/null || true
+    echo "  Voice activation set to Always Activate (continuous transmission)"
 fi
 
 # ── Block TeamSpeak license/update/CDN servers ──────────────────

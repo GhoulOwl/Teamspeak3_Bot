@@ -145,13 +145,10 @@ class FFmpegProcess:
             cmd.append("-re")
 
         # Audio filter chain:
-        #   1. volume   — coarse gain control (user-settable volume)
-        #   2. dynaudnorm — dynamic audio normalizer to keep loudness
-        #      consistent across tracks with different mastering levels.
-        #      f=500 : 500 ms analysis window (smooth, minimal artifacts)
-        #      g=15  : Gaussian smoothing window (avoids pumping effect)
-        #      p=0.9 : peak target at 90 % (headroom to avoid clipping)
-        af_filter = f"volume={gain},dynaudnorm=f=500:g=15:p=0.9"
+        #   volume — coarse gain control (user-settable volume)
+        # dynaudnorm removed: it caused volume pumping and frequency imbalance
+        # within tracks (quiet sections boosted, loud sections attenuated).
+        af_filter = f"volume={gain}"
 
         cmd.extend([
             "-i", url,

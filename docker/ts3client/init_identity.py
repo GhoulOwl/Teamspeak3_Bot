@@ -186,9 +186,10 @@ def init_settings():
         "sound/volume/master": "100",
         "sound/volume/microphone": "100",
         "sound/volume/speaker": "100",
-        # Disable voice activation (we only play audio, no mic).
-        # Also set the activation level to maximum sensitivity so
-        # quiet audio passages are never gated out.
+        # Set capture to Always Activate mode (continuous transmission).
+        # capture/voiceactivation=0 means "Always Activate" (no gating).
+        # capture/voiceactivation_level=0 ensures minimum threshold.
+        # capture/volume=100 ensures full input volume.
         "capture/voiceactivation": "0",
         "capture/voiceactivation_level": "0",
         "capture/volume": "100",
