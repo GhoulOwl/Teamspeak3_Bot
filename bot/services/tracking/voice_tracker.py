@@ -273,11 +273,6 @@ class VoiceClientTracker:
                 "Failed to register channel events for %d (may already be registered)",
                 channel_id,
             )
-                logger.info(
-                    "Voice client connected (clid=%d, channel=%d)",
-                    clid, cid,
-                )
-                await self._move_to_channel(cid)
 
     async def _on_client_moved(self, event: SQEvent) -> None:
         """Handle client moving between channels."""
