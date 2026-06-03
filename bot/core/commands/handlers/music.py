@@ -170,7 +170,7 @@ def register(registry: CommandRegistry, app: BotApplication) -> None:
             return
 
         display = f"[B]{current.song.title}[/B] 歌词:\n{lyrics.format_display()}"
-        await ctx.reply_same(display)
+        await ctx.reply_long(display)
 
     @registry.command("clear", aliases=["清空"], help="清空队列", admin_only=True)
     async def handle_clear(ctx: CommandContext) -> None:

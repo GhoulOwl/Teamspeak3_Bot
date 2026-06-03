@@ -86,13 +86,19 @@ class Lyrics:
             lines=lines,
         )
 
-    def format_display(self, max_lines: int = 10) -> str:
-        """Format lyrics for display (without timestamps)."""
+    def format_display(self, max_lines: int | None = None) -> str:
+        """Format lyrics for display (without timestamps).
+
+        Args:
+            max_lines: Maximum number of lyric lines to include.
+                       None means no limit (show all).
+        """
         display_lines = []
-        for line in self.lines[:max_lines]:
+        source = self.lines[:max_lines] if max_lines else self.lines
+        for line in source:
             if line.text.strip():
                 display_lines.append(line.text.strip())
-        if len(self.lines) > max_lines:
+        if max_lines and len(self.lines) > max_lines:
             display_lines.append("...")
         return "\n".join(display_lines)
 
