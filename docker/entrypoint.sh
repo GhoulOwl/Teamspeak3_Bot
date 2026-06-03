@@ -54,9 +54,14 @@ if [ -f /home/ts3bot/.ts3client/settings.db ]; then
     # Old config used a single sink (ts3bot_sink) for both capture and playback,
     # which caused other users' voices to echo back through the bot.
     # New config uses separate sinks: ts3bot_music (capture) and ts3bot_playback.
+    # IMPORTANT: capture/mode and playback/mode MUST be set to "1" (Custom device)
+    # otherwise the TS3 client ignores the device names and uses the default device,
+    # which causes it to capture ALL audio (including other users' voices) → echo!
     sqlite3 /home/ts3bot/.ts3client/settings.db \
         "INSERT OR REPLACE INTO settings (key, value) VALUES \
+         ('capture/mode', '1'), \
          ('capture/device', 'ts3bot_music.monitor'), \
+         ('playback/mode', '1'), \
          ('playback/device', 'ts3bot_playback');" 2>/dev/null || true
     echo "  Audio devices migrated to dual-sink (ts3bot_music + ts3bot_playback)"
 
@@ -76,13 +81,15 @@ if [ -f /home/ts3bot/.ts3client/settings.db ]; then
     # capture/voiceactivation=0 means Always Activate (continuous transmission).
     # capture/voiceactivation_level=0 ensures minimum threshold (no gating).
     # capture/volume=100 ensures full input volume.
+    # capture/autostart=1 ensures TS3 starts capturing on connect.
     # These settings may be missing from older databases created before
     # they were added to init_identity.py.
     sqlite3 /home/ts3bot/.ts3client/settings.db \
         "INSERT OR REPLACE INTO settings (key, value) VALUES \
          ('capture/voiceactivation', '0'), \
          ('capture/voiceactivation_level', '0'), \
-         ('capture/volume', '100');" 2>/dev/null || true
+         ('capture/volume', '100'), \
+         ('capture/autostart', '1');" 2>/dev/null || true
     echo "  Voice activation set to Always Activate (continuous transmission)"
 fi
 
@@ -243,7 +250,7 @@ if [ -n "$TS3BIN" ]; then
         echo "  settings.db found at /home/ts3bot/.ts3client/settings.db (correct)"
         echo "  Key settings:"
         sqlite3 /home/ts3bot/.ts3client/settings.db \
-            "SELECT key, value FROM settings WHERE key IN ('license/accepted_version','capture/device','playback/device','gui/eula_accepted');" \
+            "SELECT key, value FROM settings WHERE key IN ('license/accepted_version','capture/mode','capture/device','playback/mode','playback/device','gui/eula_accepted');" \
             2>/dev/null || echo "  (could not query settings)"
         echo "  Bookmarks:"
         sqlite3 /home/ts3bot/.ts3client/settings.db \

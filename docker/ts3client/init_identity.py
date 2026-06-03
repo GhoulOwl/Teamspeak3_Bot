@@ -88,6 +88,45 @@ def _ensure_settings_table(cursor: sqlite3.Cursor) -> None:
     """)
 
 
+def _apply_audio_settings(cursor: sqlite3.Cursor) -> None:
+    """Apply audio device and processing settings for dual-sink architecture.
+
+    Two-sink architecture isolates music input from voice output:
+    - Capture: ts3bot_music.monitor (only FFmpeg music output)
+    - Playback: ts3bot_playback (other users' audio, NOT captured → no echo)
+
+    Also disables all TS3 audio processing (echo cancel, noise suppression, AGC)
+    which are designed for voice and harmful to music quality.
+
+    Uses INSERT OR REPLACE so they are always applied, even on existing DBs
+    that may have stale single-sink configuration.
+    """
+    audio_settings = {
+        # Dual-sink audio device routing
+        "capture/mode": "1",  # Custom device (NOT default)
+        "capture/device": "ts3bot_music.monitor",
+        "playback/mode": "1",  # Custom device (NOT default)
+        "playback/device": "ts3bot_playback",
+        # Always Activate mode (continuous transmission, no gating)
+        "capture/voiceactivation": "0",
+        "capture/voiceactivation_level": "0",
+        "capture/volume": "100",
+        "capture/autostart": "1",
+        # Disable ALL audio processing (harmful for music playback)
+        "capture/echo_cancel": "0",
+        "capture/echo_cancel_aggressive": "0",
+        "capture/echo_suppression": "0",
+        "capture/noise_suppression": "0",
+        "capture/automatic_gain_control": "0",
+    }
+    for key, value in audio_settings.items():
+        cursor.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+    print("  Applied audio settings (dual-sink routing, processing disabled)")
+
+
 def _apply_critical_settings(cursor: sqlite3.Cursor) -> None:
     """Apply settings that are critical for headless operation.
 
@@ -143,6 +182,9 @@ def init_settings():
             # Re-apply critical settings in case they were missing from
             # a previous version of this script.
             _apply_critical_settings(cursor)
+            # Re-apply audio settings to fix stale single-sink config
+            # that causes echo (other users' voices captured and sent back).
+            _apply_audio_settings(cursor)
             conn.commit()
         except Exception as e:
             print(f"  Settings check failed: {e}", file=sys.stderr)
