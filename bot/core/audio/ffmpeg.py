@@ -45,7 +45,7 @@ class FFmpegProcess:
     def __init__(
         self,
         ffmpeg_path: str | None = None,
-        pulse_sink: str = "ts3bot_sink",
+        pulse_sink: str = "ts3bot_music",
         sample_rate: int = 48000,
         channels: int = 2,
     ) -> None:
@@ -147,12 +147,11 @@ class FFmpegProcess:
         # Audio filter chain:
         #   1. volume   — coarse gain control (user-settable volume)
         #   2. dynaudnorm — dynamic audio normalizer to keep loudness
-        #      consistent and prevent quiet passages from being cut by
-        #      the TS3 client's voice-activation threshold.
-        #      f=150 : 150 ms analysis window (responsive)
-        #      g=15  : Gaussian smoothing window (avoids pumping)
-        #      p=0.95: peak target at 95 % (conservative, avoids clipping)
-        af_filter = f"volume={gain},dynaudnorm=f=150:g=15:p=0.95"
+        #      consistent across tracks with different mastering levels.
+        #      f=500 : 500 ms analysis window (smooth, minimal artifacts)
+        #      g=15  : Gaussian smoothing window (avoids pumping effect)
+        #      p=0.9 : peak target at 90 % (headroom to avoid clipping)
+        af_filter = f"volume={gain},dynaudnorm=f=500:g=15:p=0.9"
 
         cmd.extend([
             "-i", url,

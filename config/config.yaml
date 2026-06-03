@@ -12,7 +12,7 @@ ts3:
 
 # ── Audio Pipeline ──────────────────────────────
 audio:
-  pulse_sink_name: "ts3bot_sink"
+  pulse_sink_name: "ts3bot_music"
   default_volume: 70
   fade_duration_ms: 500
   ffmpeg_path: null  # Auto-detect (set to /usr/bin/ffmpeg for Docker/Linux)

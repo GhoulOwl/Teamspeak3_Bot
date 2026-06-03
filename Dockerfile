@@ -138,9 +138,7 @@ RUN useradd -m -s /bin/bash ts3bot \
 # ("This program is not intended to be run as root") is harmless and can be ignored.
 RUN mkdir -p /etc/pulse \
     && echo "autospawn = no" > /etc/pulse/client.conf \
-    && echo "allow-module-loading = yes" > /etc/pulse/daemon.conf \
-    && echo "exit-idle-time = -1" >> /etc/pulse/daemon.conf \
-    && echo "flat-volumes = no" >> /etc/pulse/daemon.conf
+    && printf "allow-module-loading = yes\nexit-idle-time = -1\nflat-volumes = no\nresample-method = speex-float-5\n" > /etc/pulse/daemon.conf
 
 # PulseAudio config
 COPY docker/pulseaudio/default.pa /etc/pulse/default.pa

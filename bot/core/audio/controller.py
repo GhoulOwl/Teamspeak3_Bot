@@ -33,7 +33,7 @@ class AudioController:
     def __init__(
         self,
         ffmpeg_path: str | None = None,
-        pulse_sink: str = "ts3bot_sink",
+        pulse_sink: str = "ts3bot_music",
         default_volume: int = 70,
         fade_duration_ms: int = 500,
     ) -> None:

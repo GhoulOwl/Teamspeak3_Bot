@@ -174,12 +174,14 @@ def init_settings():
         )
     """)
 
-    # Audio device settings -- use PulseAudio null sink
+    # Audio device settings -- two-sink architecture for voice isolation
+    # - Capture: ts3bot_music.monitor (only FFmpeg music output)
+    # - Playback: ts3bot_playback (other users' audio goes here, NOT captured)
     audio_settings = {
         "capture/mode": "1",  # Custom device
-        "capture/device": "ts3bot_sink.monitor",
+        "capture/device": "ts3bot_music.monitor",
         "playback/mode": "1",  # Custom device
-        "playback/device": "ts3bot_sink",
+        "playback/device": "ts3bot_playback",
         "sound/pack": "default",
         "sound/volume/master": "100",
         "sound/volume/microphone": "100",

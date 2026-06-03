@@ -19,7 +19,7 @@ class VolumeController:
     On macOS, only FFmpeg-level volume control is available.
     """
 
-    def __init__(self, pulse_sink: str = "ts3bot_sink") -> None:
+    def __init__(self, pulse_sink: str = "ts3bot_music") -> None:
         self._pulse_sink = pulse_sink
         self._current_volume: int = 70  # 0-100
         self._sink_input_id: str | None = None

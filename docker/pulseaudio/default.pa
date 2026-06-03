@@ -1,12 +1,23 @@
-# PulseAudio default configuration for TS3 Bot
-# Minimal setup: null sink + local protocol only
+# PulseAudio configuration for TS3 Bot
+# Two-sink architecture for voice isolation:
+#   ts3bot_music   — FFmpeg outputs music here; TS3 captures from its monitor
+#   ts3bot_playback — TS3 plays back other users' audio here (not captured)
+# This prevents other users' voices from being echoed back through the bot.
 
-# Load null sink (virtual audio device)
-load-module module-null-sink sink_name=ts3bot_sink sink_properties=device.description="TS3Bot_Virtual_Sink"
+# Music sink: FFmpeg outputs here, TS3 capture reads from its monitor
+load-module module-null-sink sink_name=ts3bot_music \
+    sink_properties=device.description="TS3Bot_Music" \
+    rate=48000 format=s16le channels=2
 
-# Set defaults
-set-default-sink ts3bot_sink
-set-default-source ts3bot_sink.monitor
+# Playback sink: TS3 client plays other users' audio here (black hole)
+# Their voices go into this sink and are NOT captured by the bot
+load-module module-null-sink sink_name=ts3bot_playback \
+    sink_properties=device.description="TS3Bot_Playback" \
+    rate=48000 format=s16le channels=2
+
+# Set defaults (music sink for FFmpeg output, its monitor for TS3 capture)
+set-default-sink ts3bot_music
+set-default-source ts3bot_music.monitor
 
 # Local protocol for FFmpeg and TS3 client
 load-module module-native-protocol-unix socket=/tmp/pulse-native auth-anonymous=1

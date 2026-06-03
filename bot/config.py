@@ -46,7 +46,7 @@ class TS3Config(BaseModel):
 
 
 class AudioConfig(BaseModel):
-    pulse_sink_name: str = "ts3bot_sink"
+    pulse_sink_name: str = "ts3bot_music"
     default_volume: int = Field(default=70, ge=0, le=100)
     fade_duration_ms: int = 500
     ffmpeg_path: str | None = None  # Auto-detect if None

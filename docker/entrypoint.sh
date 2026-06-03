@@ -42,6 +42,16 @@ if [ -f /home/ts3bot/.ts3client/settings.db ]; then
     sqlite3 /home/ts3bot/.ts3client/settings.db \
         "INSERT OR REPLACE INTO settings (key, value) VALUES ('license/accepted_version', '99');" 2>/dev/null || true
     echo "  Bookmarks auto_connect disabled, license version set to 99"
+
+    # ── Migrate audio device settings to dual-sink architecture ──
+    # Old config used a single sink (ts3bot_sink) for both capture and playback,
+    # which caused other users' voices to echo back through the bot.
+    # New config uses separate sinks: ts3bot_music (capture) and ts3bot_playback.
+    sqlite3 /home/ts3bot/.ts3client/settings.db \
+        "INSERT OR REPLACE INTO settings (key, value) VALUES \
+         ('capture/device', 'ts3bot_music.monitor'), \
+         ('playback/device', 'ts3bot_playback');" 2>/dev/null || true
+    echo "  Audio devices migrated to dual-sink (ts3bot_music + ts3bot_playback)"
 fi
 
 # ── Block TeamSpeak license/update/CDN servers ──────────────────
