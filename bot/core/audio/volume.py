@@ -101,46 +101,60 @@ class VolumeController:
             stdout, _ = await proc.communicate()
             output = stdout.decode("utf-8", errors="replace")
 
-            # Step 1: Check if FFmpeg is already on the correct sink
-            pattern = rf"Sink Input #(\d+).*?Sink:\s*{re.escape(self._pulse_sink)}"
-            match = re.search(pattern, output, re.DOTALL)
-            if match:
-                self._sink_input_id = match.group(1)
-                logger.debug("Found sink input ID: %s", self._sink_input_id)
-                await self._apply_volume(self._sink_input_id)
-                return
+            # Parse sink inputs into individual blocks to avoid cross-block
+            # regex matching (re.DOTALL with .*? can span across blocks).
+            blocks = re.split(r"(?=Sink Input #\d+)", output)
+            entries: list[tuple[str, str, str]] = []  # (id, sink, app_name)
+            for block in blocks:
+                id_m = re.search(r"Sink Input #(\d+)", block)
+                sink_m = re.search(r"Sink:\s*(\d+)", block)
+                app_m = re.search(r'application\.name\s*=\s*"([^"]*)"', block)
+                if id_m and sink_m:
+                    entries.append((
+                        id_m.group(1),
+                        sink_m.group(1),
+                        app_m.group(1) if app_m else "",
+                    ))
 
-            # Step 2: FFmpeg not on correct sink — find it by application name
-            # (Lavf* = libavformat = FFmpeg) and move to the correct sink
-            ffmpeg_pattern = (
-                r"Sink Input #(\d+).*?application\.name\s*=\s*\"Lavf[^\"]*\""
-            )
-            ff_match = re.search(ffmpeg_pattern, output, re.DOTALL)
-            if ff_match:
-                input_id = ff_match.group(1)
-                logger.info(
-                    "FFmpeg sink input #%s on wrong sink, moving to %s",
-                    input_id, self._pulse_sink,
-                )
-                move_proc = await asyncio.create_subprocess_exec(
-                    "pactl", "move-sink-input", input_id, self._pulse_sink,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                _, stderr = await move_proc.communicate()
-                if move_proc.returncode == 0:
+            # Step 1: Check if FFmpeg is already on the correct sink.
+            # Match by application name starting with "Lavf" (libavformat).
+            for input_id, sink_id, app_name in entries:
+                if app_name.startswith("Lavf") and sink_id == self._pulse_sink:
                     self._sink_input_id = input_id
-                    logger.info("Moved FFmpeg sink input #%s to %s", input_id, self._pulse_sink)
+                    logger.debug("FFmpeg sink input #%s on correct sink", input_id)
                     await self._apply_volume(self._sink_input_id)
-                else:
-                    logger.warning(
-                        "Failed to move sink input: %s",
-                        stderr.decode(errors="replace").strip(),
+                    return
+
+            # Step 2: FFmpeg not on correct sink — find and move it.
+            for input_id, sink_id, app_name in entries:
+                if app_name.startswith("Lavf"):
+                    logger.info(
+                        "FFmpeg sink input #%s on wrong sink %s, moving to %s",
+                        input_id, sink_id, self._pulse_sink,
                     )
-                    self._sink_input_id = None
-            else:
-                logger.debug("Sink input not found for sink %s", self._pulse_sink)
-                self._sink_input_id = None
+                    move_proc = await asyncio.create_subprocess_exec(
+                        "pactl", "move-sink-input", input_id, self._pulse_sink,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    _, stderr = await move_proc.communicate()
+                    if move_proc.returncode == 0:
+                        self._sink_input_id = input_id
+                        logger.info(
+                            "Moved FFmpeg sink input #%s to %s",
+                            input_id, self._pulse_sink,
+                        )
+                        await self._apply_volume(self._sink_input_id)
+                    else:
+                        logger.warning(
+                            "Failed to move sink input: %s",
+                            stderr.decode(errors="replace").strip(),
+                        )
+                        self._sink_input_id = None
+                    return
+
+            logger.debug("FFmpeg sink input not found for sink %s", self._pulse_sink)
+            self._sink_input_id = None
 
         except FileNotFoundError:
             logger.warning("pactl not found, volume control unavailable")
