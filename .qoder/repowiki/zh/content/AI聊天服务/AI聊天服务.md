@@ -33,16 +33,17 @@
 - 深入解释聊天服务的架构设计与实现原理，包括与OpenAI兼容API的集成方式
 - 详细说明人格化系统的实现机制（预设角色配置与动态切换）
 - 阐述上下文管理策略（对话历史维护、令牌控制与内存优化）
+- **新增**：思维模型支持与回复提取机制（_extract_reply函数、enable_thinking参数、/no_think指令）
 - 提供API集成的最佳实践与安全考虑
 - 给出聊天机器人的配置选项与自定义指南
 
-该服务以TeamSpeak机器人为核心入口，通过命令系统触发AI聊天能力，并基于OpenAI兼容接口进行推理调用。
+该服务以TeamSpeak机器人为核心入口，通过命令系统触发AI聊天能力，并基于OpenAI兼容接口进行推理调用。现已增强对思维模型（如Qwen3）的专门支持。
 
 ## 项目结构
 整体采用分层+模块化的组织方式：
 - 应用层：应用编排与生命周期管理
 - 核心命令系统：命令注册、解析与上下文封装
-- 聊天服务层：AI聊天、上下文管理、人格化
+- 聊天服务层：AI聊天、上下文管理、人格化、思维模型支持
 - 配置层：类型安全的配置模型与YAML加载
 - Webhook层：可选的外部通知接收端点
 
@@ -62,6 +63,7 @@ CS["ChatService<br/>AI聊天服务"]
 CM["ContextManager<br/>上下文管理"]
 CB["ConversationBuffer<br/>滑动窗口缓冲"]
 PERS["Personas<br/>预设人格"]
+THINK["思维模型支持<br/>_extract_reply / enable_thinking"]
 end
 subgraph "配置层"
 CFG["BotConfig<br/>配置模型"]
@@ -80,41 +82,43 @@ CHATHDL --> CS
 CS --> CM
 CM --> CB
 CS --> PERS
+CS --> THINK
 CS --> OAI
 APP --> WEBHOOK
 CFG --> YML
 ```
 
-图示来源
+**图示来源**
 - [bot/app.py:27-111](file://bot/app.py#L27-L111)
 - [bot/core/commands/registry.py:28-94](file://bot/core/commands/registry.py#L28-L94)
 - [bot/core/commands/parser.py:22-67](file://bot/core/commands/parser.py#L22-L67)
 - [bot/core/commands/context.py:13-70](file://bot/core/commands/context.py#L13-L70)
-- [bot/services/chat/service.py:15-115](file://bot/services/chat/service.py#L15-L115)
+- [bot/services/chat/service.py:15-155](file://bot/services/chat/service.py#L15-L155)
 - [bot/services/chat/context.py:18-101](file://bot/services/chat/context.py#L18-L101)
-- [bot/services/chat/personas.py:5-48](file://bot/services/chat/personas.py#L5-L48)
+- [bot/services/chat/personas.py:5-52](file://bot/services/chat/personas.py#L5-L52)
 - [bot/config.py:125-160](file://bot/config.py#L125-L160)
 - [config/config.yaml:27-37](file://config/config.yaml#L27-L37)
 - [bot/web/webhook.py:32-76](file://bot/web/webhook.py#L32-L76)
 
-章节来源
+**章节来源**
 - [bot/app.py:27-111](file://bot/app.py#L27-L111)
 - [bot/config.py:125-160](file://bot/config.py#L125-L160)
 - [config/config.yaml:27-37](file://config/config.yaml#L27-L37)
 
 ## 核心组件
 - BotApplication：负责装配所有子系统（命令注册、事件订阅、服务启动），并协调生命周期
-- ChatService：封装OpenAI兼容API调用，负责人格化、上下文管理与回复生成
+- ChatService：封装OpenAI兼容API调用，负责人格化、上下文管理、回复生成与思维模型支持
 - ContextManager/ConversationBuffer：实现按频道或用户维度的滑动窗口上下文，支持令牌级裁剪
-- Personas：内置多个人格模板，支持动态切换
+- Personas：内置多个人格模板，支持动态切换，现包含思维模型禁用指令
 - 命令系统：!chat、!persona、!clear等命令处理器，连接TS3消息事件与ChatService
 - 配置系统：BotConfig与config.yaml，集中管理API密钥、模型参数、上下文窗口等
+- **新增**：思维模型支持：_extract_reply函数处理思维模型回复提取，enable_thinking参数控制思维链
 
-章节来源
+**章节来源**
 - [bot/app.py:39-111](file://bot/app.py#L39-L111)
-- [bot/services/chat/service.py:15-115](file://bot/services/chat/service.py#L15-L115)
+- [bot/services/chat/service.py:15-155](file://bot/services/chat/service.py#L15-L155)
 - [bot/services/chat/context.py:18-101](file://bot/services/chat/context.py#L18-L101)
-- [bot/services/chat/personas.py:5-48](file://bot/services/chat/personas.py#L5-L48)
+- [bot/services/chat/personas.py:5-52](file://bot/services/chat/personas.py#L5-L52)
 - [bot/core/commands/handlers/chat.py:18-81](file://bot/core/commands/handlers/chat.py#L18-L81)
 - [bot/config.py:63-72](file://bot/config.py#L63-L72)
 - [config/config.yaml:27-37](file://config/config.yaml#L27-L37)
@@ -125,7 +129,9 @@ AI聊天服务的运行流程如下：
 - Chat命令处理器调用ChatService.chat，选择当前频道的人格模板
 - ChatService根据上下文管理器获取或创建ConversationBuffer
 - 上下文缓冲区在必要时进行令牌级裁剪，然后构建OpenAI兼容的消息数组
-- 通过AsyncOpenAI客户端发起API请求，得到回复后将助手消息加入上下文并返回
+- **新增**：针对Qwen3等思维模型，自动设置enable_thinking=False参数
+- 通过AsyncOpenAI客户端发起API请求，得到回复后调用_extract_reply函数提取可用回复
+- 将助手消息加入上下文并返回
 
 ```mermaid
 sequenceDiagram
@@ -137,6 +143,7 @@ participant Handler as "!chat 处理器"
 participant ChatSvc as "ChatService"
 participant CtxMgr as "ContextManager"
 participant Buffer as "ConversationBuffer"
+participant Think as "_extract_reply"
 participant OAI as "OpenAI兼容API"
 User->>TS3 : 发送 "!chat 消息"
 TS3->>Parser : 文本消息事件
@@ -146,19 +153,25 @@ Handler->>ChatSvc : chat(message, channel_id, user_uid, username)
 ChatSvc->>CtxMgr : 获取缓冲区
 CtxMgr-->>ChatSvc : ConversationBuffer
 ChatSvc->>Buffer : trim_to_tokens / add(user)
+ChatSvc->>ChatSvc : 检查模型是否为Qwen
+alt 思维模型
+ChatSvc->>ChatSvc : 设置enable_thinking=False
+end
 ChatSvc->>OAI : chat.completions.create(messages, params)
 OAI-->>ChatSvc : 返回回复
+ChatSvc->>Think : _extract_reply(response)
+Think-->>ChatSvc : 清理后的回复
 ChatSvc->>Buffer : add(assistant)
 ChatSvc-->>Handler : AI回复文本
 Handler-->>TS3 : 回复到频道
 TS3-->>User : 显示AI回复
 ```
 
-图示来源
+**图示来源**
 - [bot/core/commands/parser.py:22-67](file://bot/core/commands/parser.py#L22-L67)
 - [bot/core/commands/registry.py:68-82](file://bot/core/commands/registry.py#L68-L82)
 - [bot/core/commands/handlers/chat.py:21-40](file://bot/core/commands/handlers/chat.py#L21-L40)
-- [bot/services/chat/service.py:61-110](file://bot/services/chat/service.py#L61-L110)
+- [bot/services/chat/service.py:90-150](file://bot/services/chat/service.py#L90-L150)
 - [bot/services/chat/context.py:62-66](file://bot/services/chat/context.py#L62-L66)
 
 ## 详细组件分析
@@ -167,7 +180,9 @@ TS3-->>User : 显示AI回复
 - OpenAI兼容客户端：使用AsyncOpenAI，支持自定义base_url与api_key
 - 参数化调用：模型、温度、最大输出tokens、上下文窗口大小
 - 人格化：根据频道获取当前人格模板，注入system prompt
+- **新增**：思维模型支持：自动检测Qwen模型并设置enable_thinking=False
 - 上下文裁剪：在添加用户消息前，先按令牌阈值裁剪旧消息
+- **新增**：回复提取：_extract_reply函数处理思维模型回复提取与标签清理
 - 错误处理：捕获API异常并返回友好提示
 
 ```mermaid
@@ -204,21 +219,28 @@ class ConversationBuffer {
 +estimate_tokens() int
 +trim_to_tokens(max_tokens) void
 }
+class ThinkingSupport {
++_extract_reply(response) str
++_THINK_TAG_RE regex
++enable_thinking bool
+}
 ChatService --> ContextManager : "使用"
+ChatService --> ThinkingSupport : "集成"
 ContextManager --> ConversationBuffer : "管理"
 ```
 
-图示来源
-- [bot/services/chat/service.py:15-115](file://bot/services/chat/service.py#L15-L115)
+**图示来源**
+- [bot/services/chat/service.py:15-155](file://bot/services/chat/service.py#L15-L155)
 - [bot/services/chat/context.py:68-101](file://bot/services/chat/context.py#L68-L101)
 
-章节来源
+**章节来源**
 - [bot/services/chat/service.py:24-48](file://bot/services/chat/service.py#L24-L48)
-- [bot/services/chat/service.py:61-110](file://bot/services/chat/service.py#L61-L110)
+- [bot/services/chat/service.py:90-150](file://bot/services/chat/service.py#L90-L150)
 - [bot/services/chat/context.py:18-66](file://bot/services/chat/context.py#L18-L66)
 
 ### 人格化系统：预设角色与动态切换
 - 预设角色：内置多种人格模板，每项包含名称、描述与system prompt
+- **新增**：思维模型禁用指令：/_no_think指令自动附加到所有system prompt
 - 动态切换：按频道维度设置人格键，未设置则回退到默认人格
 - 列表查询：!persona命令可列出可用人格并标注当前状态
 
@@ -237,13 +259,13 @@ ReplyUnknown --> End
 ReplyOK --> End
 ```
 
-图示来源
+**图示来源**
 - [bot/core/commands/handlers/chat.py:42-70](file://bot/core/commands/handlers/chat.py#L42-L70)
-- [bot/services/chat/personas.py:5-48](file://bot/services/chat/personas.py#L5-L48)
+- [bot/services/chat/personas.py:5-52](file://bot/services/chat/personas.py#L5-L52)
 
-章节来源
+**章节来源**
 - [bot/core/commands/handlers/chat.py:42-70](file://bot/core/commands/handlers/chat.py#L42-L70)
-- [bot/services/chat/personas.py:5-48](file://bot/services/chat/personas.py#L5-L48)
+- [bot/services/chat/personas.py:5-52](file://bot/services/chat/personas.py#L5-L52)
 
 ### 上下文管理策略：历史维护、令牌控制与内存优化
 - 缓冲区结构：基于双端队列的滑动窗口，限制最大消息数
@@ -261,20 +283,53 @@ Over -- 否 --> AddUser["添加用户消息"]
 Over -- 是 --> Trim["从左侧弹出最旧消息"]
 Trim --> Estimate
 AddUser --> BuildMsg["构建OpenAI消息数组"]
-BuildMsg --> CallAPI["调用API"]
-CallAPI --> AddAssist["添加助手回复到上下文"]
+BuildMsg --> CheckModel{"模型是否为Qwen?"}
+CheckModel -- 是 --> SetParam["设置enable_thinking=False"]
+CheckModel -- 否 --> CallAPI["调用API"]
+SetParam --> CallAPI
+CallAPI --> ExtractReply["_extract_reply(response)"]
+ExtractReply --> AddAssist["添加助手回复到上下文"]
 AddAssist --> Return(["返回AI回复"])
 ```
 
-图示来源
+**图示来源**
 - [bot/services/chat/context.py:57-66](file://bot/services/chat/context.py#L57-L66)
 - [bot/services/chat/context.py:32-47](file://bot/services/chat/context.py#L32-L47)
-- [bot/services/chat/service.py:85-109](file://bot/services/chat/service.py#L85-L109)
+- [bot/services/chat/service.py:120-150](file://bot/services/chat/service.py#L120-L150)
 
-章节来源
+**章节来源**
 - [bot/services/chat/context.py:18-101](file://bot/services/chat/context.py#L18-L101)
-- [bot/services/chat/service.py:61-110](file://bot/services/chat/service.py#L61-L110)
+- [bot/services/chat/service.py:90-150](file://bot/services/chat/service.py#L90-L150)
 - [tests/test_chat_context.py:6-97](file://tests/test_chat_context.py#L6-L97)
+
+### 思维模型支持：回复提取与标签清理
+- **新增**：_extract_reply函数：专门处理思维模型（如Qwen3）的回复提取
+- **新增**：思维标签清理：使用正则表达式清理"\u2055..."\u2055"格式的思维标签
+- **新增**：enable_thinking参数：自动检测Qwen模型并设置enable_thinking=False
+- **新增**：/no_think指令：在system prompt中自动附加"/no_think"指令
+- **新增**：reasoning_content支持：当content为空时，尝试使用reasoning_content作为后备
+
+```mermaid
+flowchart TD
+Input(["OpenAI响应"]) --> CheckContent{"content是否为空?"}
+CheckContent -- 否 --> StripTags["清理思维标签"]
+CheckContent -- 是 --> CheckReasoning{"reasoning_content存在?"}
+CheckReasoning -- 是 --> UseReasoning["使用reasoning_content"]
+CheckReasoning -- 否 --> Fallback["使用'...'作为后备"]
+StripTags --> Finalize["返回清理后的回复"]
+UseReasoning --> StripTags
+Fallback --> Finalize
+Finalize --> Output(["最终回复"])
+```
+
+**图示来源**
+- [bot/services/chat/service.py:19-42](file://bot/services/chat/service.py#L19-L42)
+- [bot/services/chat/personas.py:5-7](file://bot/services/chat/personas.py#L5-L7)
+
+**章节来源**
+- [bot/services/chat/service.py:19-42](file://bot/services/chat/service.py#L19-L42)
+- [bot/services/chat/service.py:123-130](file://bot/services/chat/service.py#L123-L130)
+- [bot/services/chat/personas.py:5-7](file://bot/services/chat/personas.py#L5-L7)
 
 ### 命令系统与应用编排
 - 命令注册：装饰器式注册，支持别名与帮助信息
@@ -296,14 +351,14 @@ App->>Hdl : 调用对应处理器
 Hdl-->>Ctx : 回复消息
 ```
 
-图示来源
+**图示来源**
 - [bot/app.py:140-198](file://bot/app.py#L140-L198)
 - [bot/core/commands/registry.py:35-66](file://bot/core/commands/registry.py#L35-L66)
 - [bot/core/commands/parser.py:22-67](file://bot/core/commands/parser.py#L22-L67)
 - [bot/core/commands/context.py:52-70](file://bot/core/commands/context.py#L52-L70)
 - [bot/core/commands/handlers/chat.py:21-81](file://bot/core/commands/handlers/chat.py#L21-L81)
 
-章节来源
+**章节来源**
 - [bot/core/commands/registry.py:28-94](file://bot/core/commands/registry.py#L28-L94)
 - [bot/core/commands/parser.py:22-67](file://bot/core/commands/parser.py#L22-L67)
 - [bot/core/commands/context.py:13-70](file://bot/core/commands/context.py#L13-L70)
@@ -315,14 +370,15 @@ Hdl-->>Ctx : 回复消息
 - 环境变量插值：支持${VAR}占位符替换
 - 默认值：未提供配置文件时仍可运行（密钥通过环境变量注入）
 
-章节来源
+**章节来源**
 - [bot/config.py:125-160](file://bot/config.py#L125-L160)
 - [config/config.yaml:27-37](file://config/config.yaml#L27-L37)
 
 ## 依赖分析
 - 组件耦合
-  - ChatService依赖ContextManager与Personas；ContextManager内部持有多个ConversationBuffer实例
+  - ChatService依赖ContextManager、Personas与_regex模块；ContextManager内部持有多个ConversationBuffer实例
   - 命令处理器依赖ChatService与CommandContext；BotApplication负责装配与事件绑定
+  - **新增**：ChatService依赖_regex模块进行思维标签清理
 - 外部依赖
   - OpenAI兼容API：AsyncOpenAI客户端
   - FastAPI/Webhook：可选的外部通知接收端点
@@ -338,24 +394,25 @@ REG --> PARSE["CommandParser"]
 REG --> CTX["CommandContext"]
 CHATHDL["Chat Handlers"] --> CS
 CS --> CM["ContextManager"]
+CS --> THINK["_extract_reply"]
 CM --> CB["ConversationBuffer"]
 CS --> PERS["Personas"]
 APP --> WEBHOOK["Webhook"]
 ```
 
-图示来源
+**图示来源**
 - [bot/app.py:39-111](file://bot/app.py#L39-L111)
 - [bot/core/commands/registry.py:28-94](file://bot/core/commands/registry.py#L28-L94)
-- [bot/services/chat/service.py:15-115](file://bot/services/chat/service.py#L15-L115)
+- [bot/services/chat/service.py:15-155](file://bot/services/chat/service.py#L15-L155)
 - [bot/services/chat/context.py:68-101](file://bot/services/chat/context.py#L68-L101)
-- [bot/services/chat/personas.py:5-48](file://bot/services/chat/personas.py#L5-L48)
+- [bot/services/chat/personas.py:5-52](file://bot/services/chat/personas.py#L5-L52)
 - [bot/web/webhook.py:32-76](file://bot/web/webhook.py#L32-L76)
 
-章节来源
+**章节来源**
 - [bot/app.py:39-111](file://bot/app.py#L39-L111)
-- [bot/services/chat/service.py:15-115](file://bot/services/chat/service.py#L15-L115)
+- [bot/services/chat/service.py:15-155](file://bot/services/chat/service.py#L15-L155)
 - [bot/services/chat/context.py:68-101](file://bot/services/chat/context.py#L68-L101)
-- [bot/services/chat/personas.py:5-48](file://bot/services/chat/personas.py#L5-L48)
+- [bot/services/chat/personas.py:5-52](file://bot/services/chat/personas.py#L5-L52)
 - [bot/web/webhook.py:32-76](file://bot/web/webhook.py#L32-L76)
 
 ## 性能考量
@@ -368,10 +425,11 @@ APP --> WEBHOOK["Webhook"]
 - 并发与稳定性
   - 异步OpenAI客户端支持并发请求
   - 命令处理与聊天调用解耦，避免阻塞TS3事件循环
+- **新增**：思维模型优化
+  - enable_thinking=False参数减少思维链开销
+  - _extract_reply函数避免重复处理思维标签
 - 日志与可观测性
   - 统一日志格式与级别，便于定位API错误与上下文异常
-
-[本节为通用性能建议，无需特定文件引用]
 
 ## 故障排查指南
 - 常见问题
@@ -379,19 +437,20 @@ APP --> WEBHOOK["Webhook"]
   - 令牌溢出：增大context_window或降低max_tokens，或缩短消息长度
   - 人格切换无效：确认人格键存在于预设集合中
   - 上下文未隔离：检查per_channel_context配置与调用时的channel_id
+  - **新增**：思维模型回复异常：检查模型名称是否包含"qwen"，确认enable_thinking参数正确设置
+  - **新增**：思维标签显示：确认/_no_think指令已正确附加到system prompt
 - 定位手段
   - 查看日志中的异常堆栈
   - 使用!clearctx清理上下文后重试
   - 单元测试验证上下文裁剪与隔离行为
+  - **新增**：检查_chat服务的日志输出，观察AI原始内容与清理后的回复
 
-章节来源
-- [bot/services/chat/service.py:101-103](file://bot/services/chat/service.py#L101-L103)
+**章节来源**
+- [bot/services/chat/service.py:140-145](file://bot/services/chat/service.py#L140-L145)
 - [tests/test_chat_context.py:6-97](file://tests/test_chat_context.py#L6-L97)
 
 ## 结论
-本AI聊天服务通过清晰的模块划分与强类型配置，实现了与OpenAI兼容API的稳定集成。其上下文管理与人格化机制既保证了对话连贯性，又兼顾了资源消耗与可扩展性。配合命令系统与可选Webhook，可在TeamSpeak环境中提供即开即用的智能聊天体验。
-
-[本节为总结性内容，无需特定文件引用]
+本AI聊天服务通过清晰的模块划分与强类型配置，实现了与OpenAI兼容API的稳定集成。其上下文管理与人格化机制既保证了对话连贯性，又兼顾了资源消耗与可扩展性。**新增的思维模型支持**进一步增强了对现代AI模型的兼容性，通过专门的回复提取与标签清理机制，确保了回复质量和用户体验。配合命令系统与可选Webhook，可在TeamSpeak环境中提供即开即用的智能聊天体验。
 
 ## 附录
 
@@ -402,11 +461,14 @@ APP --> WEBHOOK["Webhook"]
 - 稳定性
   - 为API调用设置合理的超时与重试策略
   - 对异常进行分类处理并记录上下文信息
+- **新增**：思维模型最佳实践
+  - 对于Qwen3等思维模型，确保enable_thinking=False参数正确设置
+  - 验证/_no_think指令已正确附加到system prompt
+  - 监控思维标签清理效果，确保回复质量
 - 可观测性
   - 记录请求ID与上下文摘要，便于追踪
   - 监控API响应时间与错误率
-
-[本节为通用实践建议，无需特定文件引用]
+  - **新增**：记录思维模型回复提取过程的日志
 
 ### 配置选项与自定义指南
 - 关键配置项
@@ -419,12 +481,13 @@ APP --> WEBHOOK["Webhook"]
   - chat.default_persona：默认人格键
   - chat.per_channel_context：是否按频道隔离上下文
 - 自定义步骤
-  - 新增人格：在预设字典中添加新的键值对
+  - 新增人格：在预设字典中添加新的键值对，系统会自动附加/_no_think指令
   - 修改默认参数：在config.yaml中调整对应字段
   - 扩展命令：参考命令注册器装饰器模式新增处理器
+  - **新增**：思维模型配置：确保模型名称包含"qwen"以启用思维模型支持
 
-章节来源
+**章节来源**
 - [bot/config.py:63-72](file://bot/config.py#L63-L72)
 - [config/config.yaml:27-37](file://config/config.yaml#L27-L37)
-- [bot/services/chat/personas.py:5-48](file://bot/services/chat/personas.py#L5-L48)
+- [bot/services/chat/personas.py:5-52](file://bot/services/chat/personas.py#L5-L52)
 - [bot/core/commands/registry.py:35-66](file://bot/core/commands/registry.py#L35-L66)
