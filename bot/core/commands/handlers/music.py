@@ -88,12 +88,10 @@ def register(registry: CommandRegistry, app: BotApplication) -> None:
         entry = app.music_queue.add(song, ctx.invoker_clid, ctx.invoker_name)
 
         if app.audio.state.value == "idle":
-            # Play immediately — fetch fresh URL
-            await _play_next(app)
-            await ctx.reply_channel(
-                f"正在播放: {song.display_name} "
-                f"- 点歌: {ctx.invoker_name}"
-            )
+            # Play immediately — _play_next handles its own channel feedback
+            success = await _play_next(app)
+            if not success:
+                logger.warning("Failed to play '%s', feedback already sent", song.display_name)
         else:
             pos = app.music_queue.length
             await ctx.reply_same(
@@ -212,12 +210,12 @@ def register(registry: CommandRegistry, app: BotApplication) -> None:
 async def _try_fallback_download(song_name: str, artist: str, app: BotApplication):
     """Try to download a song from alternative sources when Netease fails.
 
-    Searches YouTube and Bilibili for the song and returns a DownloadedAudio
+    Searches Bilibili for the song and returns a DownloadedAudio
     if found, or None if all sources fail.
+    YouTube is disabled due to bot-detection issues.
     """
     query = f"{song_name} {artist}".strip()
     fallback_urls = [
-        f"ytsearch1:{query}",  # YouTube search
         f"bilisearch1:{query}",  # Bilibili search
     ]
 
@@ -240,12 +238,12 @@ async def _try_fallback_download(song_name: str, artist: str, app: BotApplicatio
     return None
 
 
-async def _play_next(app: BotApplication) -> None:
-    """Play the next song from the queue."""
+async def _play_next(app: BotApplication) -> bool:
+    """Play the next song from the queue. Returns True on success."""
     entry = app.music_queue.next()
     if not entry:
         await app.sq.reply_to_channel("队列已空，播放结束")
-        return
+        return False
 
     if entry.is_url:
         # Download audio via yt-dlp (CDN URLs expire mid-stream)
@@ -262,13 +260,12 @@ async def _play_next(app: BotApplication) -> None:
                     await app.sq.reply_to_channel(
                         f"正在播放: {entry.song.display_name} - 点歌: {entry.requester_name}"
                     )
-                    return
+                    return True
             except Exception:
                 logger.exception("Failed to download audio: %s", original_url)
 
         await app.sq.reply_to_channel("链接解析失败，跳过")
-        await _play_next(app)
-        return
+        return await _play_next(app)
 
     # Download audio to local temp file via yt-dlp (Netease)
     try:
@@ -277,7 +274,7 @@ async def _play_next(app: BotApplication) -> None:
         logger.exception("Failed to download song %d", entry.song.id)
         downloaded = None
 
-    # Fallback: try YouTube/Bilibili when Netease download fails (VIP/region restricted)
+    # Fallback: try Bilibili when Netease download fails (VIP/region restricted)
     if not downloaded:
         logger.info(
             "Netease download failed for '%s', trying fallback sources...",
@@ -289,10 +286,9 @@ async def _play_next(app: BotApplication) -> None:
 
     if not downloaded:
         await app.sq.reply_to_channel(
-            f"歌曲不可用 (VIP或地区限制): {entry.song.display_name}"
+            f"歌曲下载失败: {entry.song.display_name}，请尝试其他歌曲"
         )
-        await _play_next(app)
-        return
+        return await _play_next(app)
 
     try:
         await app.audio.play(
@@ -303,6 +299,7 @@ async def _play_next(app: BotApplication) -> None:
         await app.sq.reply_to_channel(
             f"正在播放: {entry.song.display_name} - 点歌: {entry.requester_name}"
         )
+        return True
     except Exception:
         logger.exception("Failed to play song")
-        await _play_next(app)
+        return await _play_next(app)

@@ -110,7 +110,7 @@ class YtDlpService:
         cache_dir: str | None,
     ) -> DownloadedAudio | None:
         """Synchronous download (runs in thread pool)."""
-        out_dir = cache_dir or tempfile.gettempdir()
+        out_dir = cache_dir or os.environ.get("YTDLP_CACHE_DIR", "/data/cache")
         os.makedirs(out_dir, exist_ok=True)
         outtmpl = os.path.join(out_dir, "ts3bot_%(id)s.%(ext)s")
 
