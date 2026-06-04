@@ -20,12 +20,13 @@
 
 ## 更新摘要
 **变更内容**
-- **改进的音频路由配置**：**重大变更** Docker入口点脚本和PulseAudio配置已完全重构，实现了双声道架构的音频路由优化，确保FFmpeg音乐输出到`ts3bot_music`，TS3客户端捕获从其monitor源获取，其他用户的音频播放到`ts3bot_playback`，有效避免了音频干扰和回声问题
-- **增强的语音激活设置**：**重大变更** 通过在settings.db中强制设置capture/voiceactivation=0、capture/voiceactivation_level=0和capture/volume=100，确保TS3客户端始终处于Always Activate模式，实现连续音频传输，避免语音激活导致的音频中断
-- **改进的PulseAudio配置**：**重大变更** PulseAudio配置从单声道改为双声道（channels=2），使用`ts3bot_music`和`ts3bot_playback`两个独立的null sink模块，显著提升了音频质量，支持立体声播放
-- **音频处理优化**：**重大变更** 完全禁用了TS3客户端的所有音频处理功能（回声消除、噪声抑制、自动增益控制），这些功能专为语音设计，对音乐播放有害
-- **新增YT-DLP缓存目录配置支持**：在yt-dlp服务中增加了对`YTDLP_CACHE_DIR`环境变量的支持，允许用户自定义yt-dlp缓存目录，默认使用`/data/cache`
-- **改进容器启动脚本健壮性**：入口脚本增加了更多的错误处理、验证机制和诊断输出，包括X服务器可达性检查、PulseAudio运行状态验证、iptables规则验证等
+- **PulseAudio双sink架构配置优化**：**重大变更** 完全重构了PulseAudio配置，实现了双声道架构的音频路由优化，使用`ts3bot_music`和`ts3bot_playback`两个独立的null sink模块，分别用于音乐输出和播放回放，有效避免了音频干扰和回声问题
+- **改进的音频隔离机制**：**重大变更** 通过分离的音频路由配置，确保FFmpeg音乐输出到`ts3bot_music`，TS3客户端捕获从其monitor源获取，其他用户的音频播放到`ts3bot_playback`，实现了真正的音频隔离
+- **增强的音频路由验证**：**重大变更** 新增了完整的音频路由配置验证机制，包括PulseAudio运行状态检查、默认音频设备验证、模块加载状态检查和音频流配置验证
+- **改进的TS3客户端音频设置迁移**：**重大变更** 新增了从单声道架构到双声道架构的自动迁移机制，确保现有配置能够平滑过渡到新的双sink架构
+- **优化的音频处理禁用配置**：**重大变更** 完全禁用了TS3客户端的所有音频处理功能，包括回声消除、噪声抑制、自动增益控制等，这些功能专为语音设计，对音乐播放有害
+- **改进的语音激活设置**：**重大变更** 通过在settings.db中强制设置capture/voiceactivation=0、capture/voiceactivation_level=0和capture/volume=100，确保TS3客户端始终处于Always Activate模式，实现连续音频传输
+- **增强的容器启动脚本健壮性**：**重大变更** 入口脚本增加了更多的错误处理、验证机制和诊断输出，包括X服务器可达性检查、PulseAudio运行状态验证、iptables规则验证等
 
 ## 目录
 1. [简介](#简介)
@@ -48,7 +49,7 @@
 - 部署步骤、镜像构建命令与容器运行示例
 - 常见部署问题解决方案与最佳实践
 
-**更新** 本次更新重点反映了Docker部署的多项重要改进：改进了音频路由配置，实现了双声道架构的音频隔离，增强了语音激活设置的强制配置，改进了容器启动脚本的健壮性，新增了对YT-DLP缓存目录的配置支持。这些改进显著提升了容器的灵活性、稳定性和音频质量。
+**更新** 本次更新重点反映了Docker部署的多项重要改进：PulseAudio双sink架构配置优化，实现了音频路由的完全分离和隔离，增强了音频路由验证机制，改进了TS3客户端音频设置迁移，优化了音频处理禁用配置，改进了容器启动脚本的健壮性。这些改进显著提升了容器的灵活性、稳定性和音频质量。
 
 ## 项目结构
 该项目采用分层组织方式，Docker相关配置集中在docker目录中，应用代码位于bot目录，配置文件位于config目录。Dockerfile负责构建镜像，docker-compose.yml负责编排单容器服务，入口脚本直接管理多进程。
@@ -119,12 +120,13 @@ Bot --> YTDLPService
 - [docker-compose.yml:1-40](file://docker-compose.yml#L1-L40)
 
 ## 核心组件
-- **改进的音频路由配置**：**重大变更** Docker入口点脚本和PulseAudio配置已完全重构，实现了双声道架构的音频路由优化。PulseAudio配置现在使用`ts3bot_music`和`ts3bot_playback`两个独立的null sink模块，分别用于音乐输出和播放回放。FFmpeg音乐输出到`ts3bot_music`，TS3客户端捕获从其monitor源获取，其他用户的音频播放到`ts3bot_playback`，有效避免了音频干扰和回声问题。双声道架构（channels=2）显著提升了音频质量，支持立体声播放。
-- **增强的语音激活设置**：**重大变更** 通过在settings.db中强制设置capture/voiceactivation=0、capture/voiceactivation_level=0和capture/volume=100，确保TS3客户端始终处于Always Activate模式，实现连续音频传输。capture/voiceactivation=0表示"始终激活"（无门控），capture/voiceactivation_level=0确保最小阈值（无门控），capture/volume=100确保最大输入音量。这些设置可能在旧数据库中缺失，因此通过INSERT OR REPLACE语句进行强制配置。
-- **改进的PulseAudio配置**：**重大变更** PulseAudio配置从单声道改为双声道（channels=2），使用`ts3bot_music`和`ts3bot_playback`两个独立的null sink模块。这种双声道架构显著提升了音频质量，支持立体声播放，并有效防止其他用户的语音回声到机器人。配置文件现在使用双声道架构，提供更好的音频质量。
-- **音频处理优化**：**重大变更** 完全禁用了TS3客户端的所有音频处理功能，包括capture/echo_cancel、capture/echo_cancel_aggressive、capture/echo_suppression、capture/noise_suppression、capture/automatic_gain_control等键值均设置为0。这些功能专为语音设计，对音乐播放有害，会压缩音频动态范围并引入失真。
-- **新增YT-DLP缓存目录配置支持**：**重大变更** 在yt-dlp服务中增加了对`YTDLP_CACHE_DIR`环境变量的支持，允许用户自定义yt-dlp缓存目录。默认使用`/data/cache`，用户可以通过设置环境变量来自定义缓存位置，提供更大的灵活性和存储控制。
-- **改进容器启动脚本健壮性**：**重大变更** 入口脚本现在包含全面的错误处理和验证机制，包括X服务器可达性检查、PulseAudio运行状态验证、iptables规则验证、TS3客户端二进制文件查找调试等。这些改进显著提升了容器的稳定性和可诊断性。
+- **PulseAudio双sink架构配置优化**：**重大变更** 完全重构了PulseAudio配置，实现了双声道架构的音频路由优化。PulseAudio配置现在使用`ts3bot_music`和`ts3bot_playback`两个独立的null sink模块，分别用于音乐输出和播放回放。FFmpeg音乐输出到`ts3bot_music`，TS3客户端捕获从其monitor源获取，其他用户的音频播放到`ts3bot_playback`，实现了真正的音频隔离，有效避免了音频干扰和回声问题。双声道架构（channels=2）显著提升了音频质量，支持立体声播放。
+- **改进的音频隔离机制**：**重大变更** 通过分离的音频路由配置，确保FFmpeg音乐输出到`ts3bot_music`，TS3客户端捕获从其monitor源获取，其他用户的音频播放到`ts3bot_playback`，实现了真正的音频隔离。这种配置防止了其他用户的语音被回传到机器人，解决了音频回声问题。
+- **增强的音频路由验证**：**重大变更** 新增了完整的音频路由配置验证机制，包括PulseAudio运行状态检查、默认音频设备验证、模块加载状态检查和音频流配置验证。入口脚本现在包含详细的PulseAudio运行状态验证，检查默认音频设备、模块加载状态和音频流配置，确保TS3客户端能够正确捕获和播放音频。
+- **改进的TS3客户端音频设置迁移**：**重大变更** 新增了从单声道架构到双声道架构的自动迁移机制，确保现有配置能够平滑过渡到新的双sink架构。入口脚本现在包含从单sink到双sink的自动迁移逻辑，包括capture/mode和playback/mode设置为"1"（Custom device），以及capture/device设置为"ts3bot_music.monitor"，playback/device设置为"ts3bot_playback"。
+- **优化的音频处理禁用配置**：**重大变更** 完全禁用了TS3客户端的所有音频处理功能，包括capture/echo_cancel、capture/echo_cancel_aggressive、capture/echo_suppression、capture/noise_suppression、capture/automatic_gain_control等键值均设置为0。这些功能专为语音设计，对音乐播放有害，会压缩音频动态范围并引入失真。
+- **改进的语音激活设置**：**重大变更** 通过在settings.db中强制设置capture/voiceactivation=0、capture/voiceactivation_level=0和capture/volume=100，确保TS3客户端始终处于Always Activate模式，实现连续音频传输。capture/voiceactivation=0表示"始终激活"（无门控），capture/voiceactivation_level=0确保最小阈值（无门控），capture/volume=100确保最大输入音量。这些设置可能在旧数据库中缺失，因此通过INSERT OR REPLACE语句进行强制配置。
+- **改进的容器启动脚本健壮性**：**重大变更** 入口脚本现在包含全面的错误处理和验证机制，包括X服务器可达性检查、PulseAudio运行状态验证、iptables规则验证、TS3客户端二进制文件查找调试等。这些改进显著提升了容器的稳定性和可诊断性。
 - **增强的错误处理和日志记录**：**新增功能** 所有关键组件都增加了详细的错误处理和日志记录，包括PulseAudio模块加载失败、TS3客户端启动异常、网络连接问题等，便于快速定位和解决问题。
 - **改进的TS3客户端检测逻辑**：**更新** 入口脚本现在包含多种TS3客户端二进制文件的查找策略，支持多种命名模式和回退机制，包括精确匹配、通配符搜索和ELF二进制文件检测。
 - **改进的PulseAudio配置**：使用用户模式启动PulseAudio，提供更好的容器内音频支持和资源管理，避免了系统模式的权限问题。**新增** 实现了完整的音频路由配置，包括音频捕获和播放的可靠路由机制。
@@ -140,9 +142,9 @@ Bot --> YTDLPService
   - 安全检查：每次操作后检查对话框是否仍然存在，防止误触主窗口
 
 **章节来源**
+- [docker/pulseaudio/default.pa:1-35](file://docker/pulseaudio/default.pa#L1-L35)
 - [docker/entrypoint.sh:53-94](file://docker/entrypoint.sh#L53-L94)
 - [docker/ts3client/init_identity.py:91-127](file://docker/ts3client/init_identity.py#L91-L127)
-- [docker/pulseaudio/default.pa:1-30](file://docker/pulseaudio/default.pa#L1-L30)
 - [bot/core/audio/ffmpeg.py:45-58](file://bot/core/audio/ffmpeg.py#L45-L58)
 - [bot/core/audio/controller.py:33-44](file://bot/core/audio/controller.py#L33-L44)
 - [bot/services/netease/ytdlp.py:113](file://bot/services/netease/ytdlp.py#L113)
@@ -238,12 +240,13 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 - [docker-compose.yml:1-40](file://docker-compose.yml#L1-L40)
 
 ### 容器启动脚本与直接进程管理
-- **改进的音频路由配置**：**重大变更** Docker入口点脚本和PulseAudio配置已完全重构，实现了双声道架构的音频路由优化。PulseAudio配置现在使用`ts3bot_music`和`ts3bot_playback`两个独立的null sink模块，分别用于音乐输出和播放回放。FFmpeg音乐输出到`ts3bot_music`，TS3客户端捕获从其monitor源获取，其他用户的音频播放到`ts3bot_playback`，有效避免了音频干扰和回声问题。双声道架构（channels=2）显著提升了音频质量，支持立体声播放。
-- **增强的语音激活设置**：**重大变更** 通过在settings.db中强制设置capture/voiceactivation=0、capture/voiceactivation_level=0和capture/volume=100，确保TS3客户端始终处于Always Activate模式，实现连续音频传输。capture/voiceactivation=0表示"始终激活"（无门控），capture/voiceactivation_level=0确保最小阈值（无门控），capture/volume=100确保最大输入音量。这些设置可能在旧数据库中缺失，因此通过INSERT OR REPLACE语句进行强制配置。
-- **改进的PulseAudio配置**：**重大变更** PulseAudio配置从单声道改为双声道（channels=2），使用`ts3bot_music`和`ts3bot_playback`两个独立的null sink模块。这种双声道架构显著提升了音频质量，支持立体声播放，并有效防止其他用户的语音回声到机器人。
-- **音频处理优化**：**重大变更** 完全禁用了TS3客户端的所有音频处理功能，包括capture/echo_cancel、capture/echo_cancel_aggressive、capture/echo_suppression、capture/noise_suppression、capture/automatic_gain_control等键值均设置为0。这些功能专为语音设计，对音乐播放有害，会压缩音频动态范围并引入失真。
-- **新增YT-DLP缓存目录配置支持**：**重大变更** 在yt-dlp服务中增加了对`YTDLP_CACHE_DIR`环境变量的支持，允许用户自定义yt-dlp缓存目录。默认使用`/data/cache`，用户可以通过设置环境变量来自定义缓存位置，提供更大的灵活性和存储控制。配置逻辑为：`out_dir = cache_dir or os.environ.get("YTDLP_CACHE_DIR", "/data/cache")`。
-- **改进容器启动脚本健壮性**：**重大变更** 入口脚本现在包含全面的错误处理和验证机制，包括X服务器可达性检查、PulseAudio运行状态验证、iptables规则验证、TS3客户端二进制文件查找调试等。这些改进显著提升了容器的稳定性和可诊断性。
+- **PulseAudio双sink架构配置优化**：**重大变更** 完全重构了PulseAudio配置，实现了双声道架构的音频路由优化。PulseAudio配置现在使用`ts3bot_music`和`ts3bot_playback`两个独立的null sink模块，分别用于音乐输出和播放回放。FFmpeg音乐输出到`ts3bot_music`，TS3客户端捕获从其monitor源获取，其他用户的音频播放到`ts3bot_playback`，实现了真正的音频隔离，有效避免了音频干扰和回声问题。双声道架构（channels=2）显著提升了音频质量，支持立体声播放。
+- **改进的音频隔离机制**：**重大变更** 通过分离的音频路由配置，确保FFmpeg音乐输出到`ts3bot_music`，TS3客户端捕获从其monitor源获取，其他用户的音频播放到`ts3bot_playback`，实现了真正的音频隔离。这种配置防止了其他用户的语音被回传到机器人，解决了音频回声问题。
+- **增强的音频路由验证**：**重大变更** 新增了完整的音频路由配置验证机制，包括PulseAudio运行状态检查、默认音频设备验证、模块加载状态检查和音频流配置验证。入口脚本现在包含详细的PulseAudio运行状态验证，检查默认音频设备、模块加载状态和音频流配置，确保TS3客户端能够正确捕获和播放音频。
+- **改进的TS3客户端音频设置迁移**：**重大变更** 新增了从单声道架构到双声道架构的自动迁移机制，确保现有配置能够平滑过渡到新的双sink架构。入口脚本现在包含从单sink到双sink的自动迁移逻辑，包括capture/mode和playback/mode设置为"1"（Custom device），以及capture/device设置为"ts3bot_music.monitor"，playback/device设置为"ts3bot_playback"。
+- **优化的音频处理禁用配置**：**重大变更** 完全禁用了TS3客户端的所有音频处理功能，包括capture/echo_cancel、capture/echo_cancel_aggressive、capture/echo_suppression、capture/noise_suppression、capture/automatic_gain_control等键值均设置为0。这些功能专为语音设计，对音乐播放有害，会压缩音频动态范围并引入失真。
+- **改进的语音激活设置**：**重大变更** 通过在settings.db中强制设置capture/voiceactivation=0、capture/voiceactivation_level=0和capture/volume=100，确保TS3客户端始终处于Always Activate模式，实现连续音频传输。capture/voiceactivation=0表示"始终激活"（无门控），capture/voiceactivation_level=0确保最小阈值（无门控），capture/volume=100确保最大输入音量。这些设置可能在旧数据库中缺失，因此通过INSERT OR REPLACE语句进行强制配置。
+- **改进的容器启动脚本健壮性**：**重大变更** 入口脚本现在包含全面的错误处理和验证机制，包括X服务器可达性检查、PulseAudio运行状态验证、iptables规则验证、TS3客户端二进制文件查找调试等。这些改进显著提升了容器的稳定性和可诊断性。
 - **网络安全性实现**：**重大变更** 新增iptables规则配置，通过UID 1000阻断ts3bot用户的TCP 80/443连接，防止TeamSpeak客户端发起不必要的HTTP/HTTPS请求。iptables规则会在启动时自动应用，如果应用失败会显示警告信息，提示需要NET_ADMIN权限。
 - **DNS阻断机制**：**新增功能** 通过向/etc/hosts文件追加TeamSpeak基础设施域名条目，将所有TeamSpeak相关域名解析到127.0.0.1，包括accounting.teamspeak.com、license.teamspeak.com、update.teamspeak.com、files.teamspeak.com、addons.teamspeak.com、named.teamspeak.com、webfiles.teamspeak.com、api.teamspeak.com、myteamspeak.com、www.teamspeak.com、telemetry.teamspeak.com、web.teamspeak.com、news.teamspeak.com、ts3.tracker.baseflow.com等。
 - **增强的许可证对话框处理**：**更新** 改进了许可证对话框的自动处理机制，包含多策略检测和重试逻辑，包括Agree按钮点击、中心底部点击和Alt+F4关闭等多种处理策略。最多进行3次尝试，每次尝试都会检查对话框是否仍然存在。
@@ -299,7 +302,7 @@ Bot->>Bot : 启动Webhook/FastAPI(可选)
 **更新** PulseAudio配置从系统模式改为用户模式，提供了更好的容器内音频支持。**新增** 实现了完整的音频路由配置和验证机制。**新增** 增强了双声道架构，显著提升了音频质量。**新增** PulseAudio配置语法兼容性修复确保模块加载参数使用正确的单行语法。
 
 **章节来源**
-- [docker/pulseaudio/default.pa:1-30](file://docker/pulseaudio/default.pa#L1-L30)
+- [docker/pulseaudio/default.pa:1-35](file://docker/pulseaudio/default.pa#L1-L35)
 - [docker/entrypoint.sh:156-172](file://docker/entrypoint.sh#L156-L172)
 
 ### 应用配置与运行
@@ -439,6 +442,9 @@ TS3Client --> VoiceActivation["语音激活设置<br/>capture/voiceactivation=0<
   - **音频处理禁用问题**：**新增** 检查SQLite数据库中的音频处理设置，确认capture/echo_cancel、capture/echo_suppression、capture/noise_suppression、capture/automatic_gain_control等键值是否正确设置为0。
   - **语音激活设置问题**：**新增** **重大变更** 检查SQLite数据库中的语音激活设置，确认capture/voiceactivation、capture/voiceactivation_level、capture/volume键值是否正确设置为0、0、100。
   - **YT-DLP缓存目录问题**：**新增** 检查YTDLP_CACHE_DIR环境变量是否正确设置，确认yt-dlp缓存目录存在且可写。
+  - **双声道架构配置问题**：**新增** **重大变更** 检查PulseAudio配置文件，确认channels=2设置正确，以及ts3bot_music和ts3bot_playback两个null sink模块都已正确加载。
+  - **音频隔离问题**：**新增** **重大变更** 检查TS3客户端settings.db中的音频设备设置，确认capture/device为"ts3bot_music.monitor"，playback/device为"ts3bot_playback"。
+  - **音频路由验证问题**：**新增** **重大变更** 检查入口脚本中的音频路由验证输出，确认默认sink为ts3bot_playback，默认source为ts3bot_music.monitor。
 - Webhook无法访问
   - 确认WEBHOOK_PORT映射正确，且容器内端口8080已启用。
   - 检查WEBHOOK_SECRET与配置中的secret一致。
@@ -449,13 +455,16 @@ TS3Client --> VoiceActivation["语音激活设置<br/>capture/voiceactivation=0<
   - **新增** 检查音频处理禁用设置，确认音乐信号没有被回声消除、噪声抑制或自动增益控制处理。
   - **新增** 确认双声道架构配置正确，检查channels=2设置。
   - **新增** **语音激活设置验证**：**新增** **重大变更** 检查settings.db中的语音激活设置，确认capture/voiceactivation=0、capture/voiceactivation_level=0、capture/volume=100。
+  - **新增** **双声道架构验证**：**新增** **重大变更** 检查PulseAudio配置文件，确认channels=2设置正确，以及ts3bot_music和ts3bot_playback两个null sink模块都已正确加载。
+  - **新增** **音频隔离验证**：**新增** **重大变更** 检查TS3客户端settings.db中的音频设备设置，确认capture/device为"ts3bot_music.monitor"，playback/device为"ts3bot_playback"。
 - 首次启动未生成settings.db
   - 确保init_identity.py执行成功，检查/home/ts3bot/.ts3client目录权限。
   - **检查初始化脚本错误**：查看init_identity.py的错误输出，确认数据库创建是否成功。
   - **新增** **root用户配置文件位置问题**：检查runuser命令是否正确执行，确认TS3客户端在ts3bot用户环境中运行。
   - **新增** **自动许可证处理失败**：检查许可证接受状态，确认许可证版本99是否正确设置。
   - **新增** **音频处理禁用失败**：检查SQLite数据库设置，确认音频处理功能已正确禁用。
-  - **新增** **双声道架构配置失败**：检查PulseAudio配置文件，确认channels=2设置正确。
+  - **新增** **双声道架构配置失败**：**新增** **重大变更** 检查PulseAudio配置文件，确认channels=2设置正确，以及ts3bot_music和ts3bot_playback两个null sink模块都已正确加载。
+  - **新增** **音频隔离配置失败**：**新增** **重大变更** 检查TS3客户端settings.db中的音频设备设置，确认capture/device为"ts3bot_music.monitor"，playback/device为"ts3bot_playback"。
   - **新增** **语音激活设置失败**：**新增** **重大变更** 检查SQLite数据库中的语音激活设置，确认capture/voiceactivation、capture/voiceactivation_level、capture/volume键值正确设置。
 - 配置不生效
   - 确认/config/config.yaml存在且路径正确，或/opt/bot/config/config.yaml存在。
@@ -463,6 +472,8 @@ TS3Client --> VoiceActivation["语音激活设置<br/>capture/voiceactivation=0<
   - **新增** **TS3环境变量配置**：确认TS3_VOICE_PORT和TS3_NICKNAME环境变量已正确设置，检查默认值是否符合预期。
   - **新增** **YTDLP_CACHE_DIR配置**：确认YTDLP_CACHE_DIR环境变量已正确设置，检查自定义缓存目录存在且可写。
   - **新增** **语音激活设置配置**：**新增** **重大变更** 确认capture/voiceactivation、capture/voiceactivation_level、capture/volume键值已在settings.db中正确设置。
+  - **新增** **双声道架构配置**：**新增** **重大变更** 确认PulseAudio配置文件中的channels=2设置正确，以及ts3bot_music和ts3bot_playback两个null sink模块都已正确加载。
+  - **新增** **音频隔离配置**：**新增** **重大变更** 确认TS3客户端settings.db中的音频设备设置正确，capture/device为"ts3bot_music.monitor"，playback/device为"ts3bot_playback"。
 - **平台相关问题**
   - **镜像构建失败**：检查宿主机架构是否为linux/amd64，如为ARM64需使用多架构构建工具链
   - **容器启动异常**：确认Docker版本支持linux/amd64架构，检查容器运行时配置
@@ -481,18 +492,20 @@ TS3Client --> VoiceActivation["语音激活设置<br/>capture/voiceactivation=0<
   - **简化许可证对话框处理诊断**：**新增** 检查许可证处理日志，确认简化的处理机制正常工作
   - **ClientQuery API连接诊断**：**新增** 检查ClientQuery端口状态、API密钥读取和连接命令发送情况
   - **手动安装包验证**：**新增** 检查/opt/ts3client目录下的TS3客户端文件完整性
-  - **音频路由诊断**：**新增** 检查PulseAudio音频路由配置状态，确认音频捕获和播放路径正确
-  - **系统验证诊断**：**新增** 检查PulseAudio运行状态验证输出，确认音频设备配置正确
+  - **音频路由诊断**：**新增** **重大变更** 检查PulseAudio音频路由配置状态，确认音频捕获和播放路径正确
+  - **系统验证诊断**：**新增** **重大变更** 检查PulseAudio运行状态验证输出，确认音频设备配置正确
   - **网络安全性诊断**：**新增** 检查iptables规则应用状态，确认UID 1000的TCP 80/443连接被正确阻断
   - **DNS阻断诊断**：**新增** 检查/etc/hosts文件中的TeamSpeak域名条目，确认DNS阻断机制正常工作
   - **守护进程监控诊断**：**新增** 检查后台watchdog进程状态，确认TS3客户端异常退出时能够自动重启
   - **NET_ADMIN权限诊断**：**新增** 检查容器权限配置，确认具有iptables管理权限
-  - **PulseAudio配置语法诊断**：**新增** 检查default.pa文件中的模块加载参数语法，确认使用正确的单行语法而非反斜杠续行符
-  - **音频处理禁用诊断**：**新增** 检查SQLite数据库中的音频处理设置，确认回声消除、噪声抑制和自动增益控制功能已正确禁用
+  - **PulseAudio配置语法诊断**：**新增** **重大变更** 检查default.pa文件中的模块加载参数语法，确认使用正确的单行语法而非反斜杠续行符
+  - **音频处理禁用诊断**：**新增** **重大变更** 检查SQLite数据库中的音频处理设置，确认回声消除、噪声抑制和自动增益控制功能已正确禁用
   - **语音激活设置诊断**：**新增** **重大变更** 检查SQLite数据库中的语音激活设置，确认capture/voiceactivation、capture/voiceactivation_level、capture/volume键值正确设置为0、0、100
   - **YT-DLP缓存目录诊断**：**新增** 检查YTDLP_CACHE_DIR环境变量设置，确认yt-dlp缓存目录配置正确
+  - **双声道架构诊断**：**新增** **重大变更** 检查PulseAudio配置文件，确认channels=2设置正确，以及ts3bot_music和ts3bot_playback两个null sink模块都已正确加载
+  - **音频隔离诊断**：**新增** **重大变更** 检查TS3客户端settings.db中的音频设备设置，确认capture/device为"ts3bot_music.monitor"，playback/device为"ts3bot_playback"
 
-**更新** 新增了基于直接进程管理和用户模式音频的故障排除指南，以及手动TS3安装包和OpenSSL兼容性相关的故障排除步骤。**新增** 添加了音频路由和系统验证相关的故障排除指导。**新增** 新增了root用户配置文件位置问题解决和自动许可证处理相关的故障排除指导。**新增** 新增了Openbox窗口管理器和简化许可证对话框处理系统的故障排除指导。**新增** 新增了ClientQuery API连接机制相关的故障排除指导。**新增** 新增了网络安全性实现、DNS阻断机制和守护进程监控相关的故障排除指导。**新增** 新增了PulseAudio配置语法兼容性相关的故障排除指导。**新增** 新增了音频处理禁用功能相关的故障排除指导。**新增** 新增了YT-DLP缓存目录配置相关的故障排除指导。**新增** 新增了语音激活设置强制配置相关的故障排除指导。
+**更新** 新增了基于直接进程管理和用户模式音频的故障排除指南，以及手动TS3安装包和OpenSSL兼容性相关的故障排除步骤。**新增** 添加了音频路由和系统验证相关的故障排除指导。**新增** 新增了root用户配置文件位置问题解决和自动许可证处理相关的故障排除指导。**新增** 新增了Openbox窗口管理器和简化许可证对话框处理系统的故障排除指导。**新增** 新增了ClientQuery API连接机制相关的故障排除指导。**新增** 新增了网络安全性实现、DNS阻断机制和守护进程监控相关的故障排除指导。**新增** 新增了PulseAudio配置语法兼容性相关的故障排除指导。**新增** 新增了音频处理禁用功能相关的故障排除指导。**新增** 新增了YT-DLP缓存目录配置相关的故障排除指导。**新增** 新增了语音激活设置强制配置相关的故障排除指导。**新增** 新增了双声道架构配置和音频隔离相关的故障排除指导。
 
 **章节来源**
 - [docker/entrypoint.sh:53-94](file://docker/entrypoint.sh#L53-L94)
@@ -503,7 +516,7 @@ TS3Client --> VoiceActivation["语音激活设置<br/>capture/voiceactivation=0<
 ## 结论
 该容器化方案通过Dockerfile精确控制系统与Python依赖，结合直接bash脚本管理多进程，实现了TS3客户端headless运行与Python Bot的稳定服务。**经过重大重构的Docker入口点脚本移除了ts3:// URL参数支持，改用ClientQuery API进行程序化连接，简化了许可证对话框处理机制，增强了进程管理和错误处理能力**。特别重要的是，TeamSpeak客户端安装流程已从自动下载改为手动下载，这种方式提供了更好的版本控制和下载源控制，用户可以精确选择所需的TS3客户端版本。docker-compose.yml提供了灵活的卷挂载与环境变量配置，新增的平台特定配置确保了在linux/amd64架构上的最佳兼容性和性能。
 
-**更新** 强调Docker入口点脚本重大重构的重要性，特别是移除ts3:// URL参数支持、改用ClientQuery API进行程序化连接、简化许可证对话框处理机制的引入。**新增** 改进了PulseAudio音频路由配置和系统验证机制，进一步提升了音频捕获和播放的可靠性。**新增** Dockerfile中新增的openssl系统依赖支持RSA密钥生成，docker-compose.yml中新增的TS3_VOICE_PORT、TS3_NICKNAME和YTDLP_CACHE_DIR环境变量提供了更灵活的TS3服务器连接配置和yt-dlp缓存目录配置选项。**新增** Dockerfile中新增的openbox窗口管理器依赖为X11窗口激活和焦点管理提供必要支持。**新增** 实现了简化的许可证对话框处理系统，移除了复杂的多策略检测机制，提高了系统性能和稳定性。**新增** 新增了网络安全性实现，包括iptables规则阻断UID 1000的TCP 80/443连接和DNS阻断机制，显著提升了系统的安全性和稳定性。**新增** 新增了守护进程监控功能，确保TS3客户端异常退出时能够自动重启，提高了服务的可用性。**新增** 新增了NET_ADMIN权限配置，确保容器具有iptables管理权限。**新增** 重要的是，PulseAudio配置语法兼容性修复确保模块加载参数使用正确的单行语法，避免了反斜杠续行符导致的配置解析错误，提高了音频配置的可靠性。**新增** 增强的双声道架构显著提升了音频质量，支持立体声播放，避免了回声和音频干扰。**新增** 新增了YT-DLP缓存目录配置支持，用户可以通过YTDLP_CACHE_DIR环境变量自定义yt-dlp缓存位置，提供更大的灵活性和存储控制。**新增** **语音激活设置强制配置**：**重大变更** 通过在settings.db中强制设置capture/voiceactivation=0、capture/voiceactivation_level=0和capture/volume=100，确保TS3客户端始终处于Always Activate模式，实现连续音频传输，避免语音激活导致的音频中断。
+**更新** 强调Docker入口点脚本重大重构的重要性，特别是移除ts3:// URL参数支持、改用ClientQuery API进行程序化连接、简化许可证对话框处理机制的引入。**新增** 改进了PulseAudio音频路由配置和系统验证机制，进一步提升了音频捕获和播放的可靠性。**新增** Dockerfile中新增的openssl系统依赖支持RSA密钥生成，docker-compose.yml中新增的TS3_VOICE_PORT、TS3_NICKNAME和YTDLP_CACHE_DIR环境变量提供了更灵活的TS3服务器连接配置和yt-dlp缓存目录配置选项。**新增** Dockerfile中新增的openbox窗口管理器依赖为X11窗口激活和焦点管理提供必要支持。**新增** 实现了简化的许可证对话框处理系统，移除了复杂的多策略检测机制，提高了系统性能和稳定性。**新增** 新增了网络安全性实现，包括iptables规则阻断UID 1000的TCP 80/443连接和DNS阻断机制，显著提升了系统的安全性和稳定性。**新增** 新增了守护进程监控功能，确保TS3客户端异常退出时能够自动重启，提高了服务的可用性。**新增** 新增了NET_ADMIN权限配置，确保容器具有iptables管理权限。**新增** 重要的是，PulseAudio配置语法兼容性修复确保模块加载参数使用正确的单行语法，避免了反斜杠续行符导致的配置解析错误，提高了音频配置的可靠性。**新增** 增强的双声道架构显著提升了音频质量，支持立体声播放，避免了回声和音频干扰。**新增** 新增了YT-DLP缓存目录配置支持，用户可以通过YTDLP_CACHE_DIR环境变量自定义yt-dlp缓存位置，提供更大的灵活性和存储控制。**新增** **语音激活设置强制配置**：**重大变更** 通过在settings.db中强制设置capture/voiceactivation=0、capture/voiceactivation_level=0和capture/volume=100，确保TS3客户端始终处于Always Activate模式，实现连续音频传输，避免语音激活导致的音频中断。**新增** **双声道架构配置优化**：**重大变更** 完全重构了PulseAudio配置，实现了双声道架构的音频路由优化，使用`ts3bot_music`和`ts3bot_playback`两个独立的null sink模块，分别用于音乐输出和播放回放，实现了真正的音频隔离，有效避免了音频干扰和回声问题。
 
 ## 附录
 
@@ -529,7 +542,7 @@ TS3Client --> VoiceActivation["语音激活设置<br/>capture/voiceactivation=0<
   - 查看/data/logs中的日志文件，确认各进程启动成功。
   - 访问Webhook端口（默认8080）验证服务可用性。
   - **平台验证**：检查容器运行状态，确认平台为linux/amd64
-  - **音频路由验证**：**新增** 检查PulseAudio音频路由配置状态，确认音频捕获和播放路径正确
+  - **音频路由验证**：**新增** **重大变更** 检查PulseAudio音频路由配置状态，确认音频捕获和播放路径正确
   - **新增** **root用户配置文件位置验证**：**新增** 检查/home/ts3bot/.ts3client/settings.db是否存在，确认TS3客户端在正确的用户环境中运行
   - **新增** **自动许可证处理验证**：**新增** 检查init_identity.py的许可证接受状态，确认headless模式下TS3客户端能够正常启动
   - **新增** **Openbox窗口管理器验证**：**新增** 检查Openbox是否正常启动，确认窗口管理功能可用
@@ -538,10 +551,12 @@ TS3Client --> VoiceActivation["语音激活设置<br/>capture/voiceactivation=0<
   - **新增** **网络安全性验证**：**新增** 检查iptables规则应用状态，确认UID 1000的TCP 80/443连接被正确阻断
   - **新增** **DNS阻断验证**：**新增** 检查/etc/hosts文件中的TeamSpeak域名条目，确认DNS阻断机制正常工作
   - **新增** **守护进程监控验证**：**新增** 检查后台watchdog进程状态，确认TS3客户端异常退出时能够自动重启
-  - **新增** **PulseAudio配置语法验证**：**新增** 检查docker/pulseaudio/default.pa文件中的模块加载参数语法，确认使用正确的单行语法
-  - **新增** **音频处理禁用验证**：**新增** 检查SQLite数据库中的音频处理设置，确认capture/echo_cancel、capture/echo_suppression、capture/noise_suppression、capture/automatic_gain_control等键值已正确设置为0
+  - **新增** **PulseAudio配置语法验证**：**新增** **重大变更** 检查docker/pulseaudio/default.pa文件中的模块加载参数语法，确认使用正确的单行语法
+  - **新增** **音频处理禁用验证**：**新增** **重大变更** 检查SQLite数据库中的音频处理设置，确认capture/echo_cancel、capture/echo_suppression、capture/noise_suppression、capture/automatic_gain_control等键值已正确设置为0
   - **新增** **语音激活设置验证**：**新增** **重大变更** 检查SQLite数据库中的语音激活设置，确认capture/voiceactivation、capture/voiceactivation_level、capture/volume键值正确设置为0、0、100
   - **新增** **YT-DLP缓存目录验证**：**新增** 检查YTDLP_CACHE_DIR环境变量设置，确认yt-dlp缓存目录配置正确
+  - **新增** **双声道架构验证**：**新增** **重大变更** 检查PulseAudio配置文件，确认channels=2设置正确，以及ts3bot_music和ts3bot_playback两个null sink模块都已正确加载
+  - **新增** **音频隔离验证**：**新增** **重大变更** 检查TS3客户端settings.db中的音频设备设置，确认capture/device为"ts3bot_music.monitor"，playback/device为"ts3bot_playback"
 - **调试和监控**：
   - **查看详细日志**：使用 `docker logs ts3bot` 查看完整的启动日志
   - **检查进程状态**：使用 `docker exec ts3bot ps aux` 查看进程状态
@@ -556,18 +571,20 @@ TS3Client --> VoiceActivation["语音激活设置<br/>capture/voiceactivation=0<
   - **简化许可证对话框处理诊断**：**新增** 检查许可证处理日志，确认简化的处理机制正常工作
   - **ClientQuery API连接诊断**：**新增** 检查ClientQuery连接状态、API密钥读取和连接命令发送情况
   - **手动安装包验证**：**新增** 检查/opt/ts3client目录下的TS3客户端文件完整性
-  - **音频路由诊断**：**新增** 检查PulseAudio音频路由配置状态，确认音频捕获和播放路径正确
-  - **系统验证诊断**：**新增** 检查PulseAudio运行状态验证输出，确认音频设备配置正确
+  - **音频路由诊断**：**新增** **重大变更** 检查PulseAudio音频路由配置状态，确认音频捕获和播放路径正确
+  - **系统验证诊断**：**新增** **重大变更** 检查PulseAudio运行状态验证输出，确认音频设备配置正确
   - **网络安全性诊断**：**新增** 检查iptables规则应用状态，确认UID 1000的TCP 80/443连接被正确阻断
   - **DNS阻断诊断**：**新增** 检查/etc/hosts文件中的TeamSpeak域名条目，确认DNS阻断机制正常工作
   - **守护进程监控诊断**：**新增** 检查后台watchdog进程状态，确认TS3客户端异常退出时能够自动重启
   - **NET_ADMIN权限诊断**：**新增** 检查容器权限配置，确认具有iptables管理权限
-  - **PulseAudio配置语法诊断**：**新增** 检查default.pa文件中的模块加载参数语法，确认使用正确的单行语法而非反斜杠续行符
-  - **音频处理禁用诊断**：**新增** 检查SQLite数据库中的音频处理设置，确认回声消除、噪声抑制和自动增益控制功能已正确禁用
+  - **PulseAudio配置语法诊断**：**新增** **重大变更** 检查default.pa文件中的模块加载参数语法，确认使用正确的单行语法而非反斜杠续行符
+  - **音频处理禁用诊断**：**新增** **重大变更** 检查SQLite数据库中的音频处理设置，确认回声消除、噪声抑制和自动增益控制功能已正确禁用
   - **语音激活设置诊断**：**新增** **重大变更** 检查SQLite数据库中的语音激活设置，确认capture/voiceactivation、capture/voiceactivation_level、capture/volume键值正确设置为0、0、100
   - **YT-DLP缓存目录诊断**：**新增** 检查YTDLP_CACHE_DIR环境变量设置，确认yt-dlp缓存目录配置正确
+  - **双声道架构诊断**：**新增** **重大变更** 检查PulseAudio配置文件，确认channels=2设置正确，以及ts3bot_music和ts3bot_playback两个null sink模块都已正确加载
+  - **音频隔离诊断**：**新增** **重大变更** 检查TS3客户端settings.db中的音频设备设置，确认capture/device为"ts3bot_music.monitor"，playback/device为"ts3bot_playback"
 
-**更新** 新增了TS3客户端手动安装包准备步骤和OpenSSL兼容性相关的部署指导。**新增** 添加了音频路由和系统验证相关的调试和监控指导。**新增** 新增了root用户配置文件位置问题解决和自动许可证处理相关的部署和调试指导。**新增** 新增了Openbox窗口管理器和简化许可证对话框处理系统的调试和监控指导。**新增** 新增了ClientQuery API连接机制相关的调试和监控指导。**新增** 新增了网络安全性实现、DNS阻断机制和守护进程监控相关的调试和监控指导。**新增** 新增了PulseAudio配置语法兼容性相关的调试和监控指导。**新增** 新增了音频处理禁用功能相关的调试和监控指导。**新增** 新增了YT-DLP缓存目录配置相关的调试和监控指导。**新增** 新增了语音激活设置强制配置相关的调试和监控指导。
+**更新** 新增了TS3客户端手动安装包准备步骤和OpenSSL兼容性相关的部署指导。**新增** 添加了音频路由和系统验证相关的调试和监控指导。**新增** 新增了root用户配置文件位置问题解决和自动许可证处理相关的部署和调试指导。**新增** 新增了Openbox窗口管理器和简化许可证对话框处理系统的调试和监控指导。**新增** 新增了ClientQuery API连接机制相关的调试和监控指导。**新增** 新增了网络安全性实现、DNS阻断机制和守护进程监控相关的调试和监控指导。**新增** 新增了PulseAudio配置语法兼容性相关的调试和监控指导。**新增** 新增了音频处理禁用功能相关的调试和监控指导。**新增** 新增了YT-DLP缓存目录配置相关的调试和监控指导。**新增** 新增了语音激活设置强制配置相关的调试和监控指导。**新增** 新增了双声道架构配置和音频隔离相关的调试和监控指导。
 
 **章节来源**
 - [docker-compose.yml:1-40](file://docker-compose.yml#L1-L40)

@@ -4,7 +4,7 @@
 
 ## 功能特性
 
-- **多平台音乐播放** — 通过 yt-dlp 提取音频直链，支持网易云音乐、YouTube、Bilibili、SoundCloud 等平台，使用 FFmpeg + PulseAudio 双 sink 架构将音频注入 TS3 频道
+- **多平台音乐播放** — 通过 yt-dlp 提取音频直链，支持网易云音乐、~~YouTube~~、Bilibili、~~SoundCloud~~ 等平台，使用 FFmpeg + PulseAudio 双 sink 架构将音频注入 TS3 频道
 - **AI 智能聊天** — 集成 OpenAI 兼容 API，内置多套中文人设（陪玩群友 / 游戏研究员 / 懒散群友），按频道隔离对话上下文
 - **自动化功能** — 自动欢迎新成员、自动分配身份组、房间跟随模式、定时提醒（APScheduler）、Webhook 外部通知
 - **完整命令系统** — 22 个可用命令，涵盖播放控制、队列管理、AI 交互、管理员操作等
