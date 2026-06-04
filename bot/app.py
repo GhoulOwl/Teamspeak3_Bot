@@ -8,6 +8,8 @@ import signal
 
 from bot.config import BotConfig, load_config
 from bot.core.audio.controller import AudioController
+from bot.core.clientquery.client import AsyncClientQueryClient
+from bot.core.clientquery.context import VoiceCommandContext
 from bot.core.commands.context import CommandContext
 from bot.core.commands.parser import parse_command
 from bot.core.commands.router import CommandRouter
@@ -20,7 +22,6 @@ from bot.services.chat.service import ChatService
 from bot.services.netease.client import NeteaseAPIClient
 from bot.services.queue.manager import MusicQueue
 from bot.services.scheduler.jobs import SchedulerService
-from bot.services.tracking.voice_tracker import VoiceClientTracker
 
 logger = logging.getLogger(__name__)
 
@@ -100,11 +101,15 @@ class BotApplication:
 
         self.scheduler = SchedulerService(app=self)
 
-        # Voice client tracker: keeps ServerQuery in the same channel
-        # as the TS3 voice client so commands work in any channel
-        self.voice_tracker = VoiceClientTracker(
-            app=self,
-            voice_nickname=self.config.ts3.nickname,
+        # ClientQuery: persistent connection to the TS3 voice client
+        # for receiving/sending text messages directly
+        self.cq = AsyncClientQueryClient(
+            host=self.config.clientquery.host,
+            port=self.config.clientquery.port,
+            api_key="",  # Read dynamically from clientquery.ini at startup
+            server_address=self.config.ts3.host,
+            server_port=self.config.ts3.voice_port,
+            nickname=self.config.ts3.nickname,
         )
 
         # Webhook
@@ -145,6 +150,29 @@ class BotApplication:
             handlers=handlers,
         )
 
+    @staticmethod
+    def _read_clientquery_api_key() -> str:
+        """Read the ClientQuery API key from clientquery.ini."""
+        import os
+        from pathlib import Path
+
+        candidates = [
+            Path(os.path.expanduser("~/.ts3client/clientquery.ini")),
+            Path("/home/ts3bot/.ts3client/clientquery.ini"),
+        ]
+        for path in candidates:
+            if path.exists():
+                try:
+                    text = path.read_text(encoding="utf-8")
+                    for line in text.splitlines():
+                        if line.startswith("api_key="):
+                            key = line.split("=", 1)[1].strip()
+                            logger.info("ClientQuery API key loaded from %s", path)
+                            return key
+                except Exception:
+                    logger.warning("Failed to read %s", path, exc_info=True)
+        return ""
+
     def _register_commands(self) -> None:
         """Register all command handlers with layered routing."""
         from bot.core.commands.handlers import admin, chat, debug, music, volume
@@ -168,27 +196,25 @@ class BotApplication:
         logger.info("Registered %d commands", self.router.all_command_count())
 
     def _setup_event_handlers(self) -> None:
-        """Wire up ServerQuery event handlers."""
-        # Command routing: text message → command parser → handler
-        self.sq.dispatcher.subscribe("textmessage", self._on_text_message)
+        """Wire up event handlers for both ServerQuery and ClientQuery."""
+        # ServerQuery: admin commands only (private messages)
+        self.sq.dispatcher.subscribe("textmessage", self._on_sq_text_message)
 
-        # Automation services
+        # ClientQuery: daily commands (channel + private via voice client)
+        self.cq.dispatcher.subscribe("textmessage", self._on_cq_text_message)
+
+        # Automation services (via ServerQuery server events)
         self.welcome_service.subscribe()
         self.group_assigner.subscribe()
         self.follow_mode.subscribe()
 
-        # Voice client tracker (subscribes to cliententerview/clientmoved)
-        self.voice_tracker.subscribe()
-
-    async def _on_text_message(self, event: SQEvent) -> None:
-        """Route text messages to the command system."""
+    async def _on_sq_text_message(self, event: SQEvent) -> None:
+        """Handle ServerQuery text messages — admin commands only."""
         msg_event = TextMessageEvent.from_event(event)
 
-        # Ignore messages from ourselves
         if msg_event.invoker_clid == self.sq.client_id:
             return
 
-        # Parse command
         cmd = parse_command(
             text=msg_event.message,
             prefix=self.config.ts3.command_prefix,
@@ -197,23 +223,55 @@ class BotApplication:
             invoker_name=msg_event.invoker_name,
             target_mode=msg_event.target_mode,
         )
-
         if cmd is None:
             return
 
-        # Route command based on message source (channel vs private)
-        cmd_info = self.router.resolve(cmd.name, cmd.target_mode)
+        # Route to private (admin) registry only
+        cmd_info = self.router.private_registry.get(cmd.name)
         if cmd_info is None:
             return
 
-        # Execute command
         ctx = CommandContext(cmd, self.sq)
+        try:
+            await cmd_info.handler(ctx)
+        except Exception:
+            logger.exception("Error executing admin command '%s'", cmd.name)
+            try:
+                await ctx.reply(f"命令执行出错: {cmd.name}")
+            except Exception:
+                pass
+
+    async def _on_cq_text_message(self, event: SQEvent) -> None:
+        """Handle ClientQuery text messages — daily commands via voice client."""
+        msg_event = TextMessageEvent.from_event(event)
+
+        # Ignore messages from the voice client itself
+        if msg_event.invoker_clid == self.cq.client_id:
+            return
+
+        cmd = parse_command(
+            text=msg_event.message,
+            prefix=self.config.ts3.command_prefix,
+            invoker_clid=msg_event.invoker_clid,
+            invoker_uid=msg_event.invoker_uid,
+            invoker_name=msg_event.invoker_name,
+            target_mode=msg_event.target_mode,
+        )
+        if cmd is None:
+            return
+
+        # Route to channel (daily) registry
+        cmd_info = self.router.channel_registry.get(cmd.name)
+        if cmd_info is None:
+            return
+
+        ctx = VoiceCommandContext(cmd, self.cq)
         try:
             await cmd_info.handler(ctx)
         except Exception:
             logger.exception("Error executing command '%s'", cmd.name)
             try:
-                await ctx.reply(f"命令执行出错: {cmd.name}")
+                await ctx.reply_same(f"命令执行出错: {cmd.name}")
             except Exception:
                 pass
 
@@ -236,13 +294,13 @@ class BotApplication:
                             temp_file=downloaded.path,
                             duration=downloaded.duration,
                         )
-                        await self.sq.reply_to_channel(
+                        await self.cq.reply_to_channel(
                             f"正在播放: {entry.song.display_name} - 点歌: {entry.requester_name}"
                         )
                         return
                 except Exception:
                     logger.exception("Failed to download audio")
-            await self.sq.reply_to_channel("链接解析失败，跳过")
+            await self.cq.reply_to_channel("链接解析失败，跳过")
             await self._on_playback_stopped()
             return
 
@@ -261,7 +319,7 @@ class BotApplication:
             )
 
         if not downloaded:
-            await self.sq.reply_to_channel(f"歌曲不可用: {entry.song.display_name}")
+            await self.cq.reply_to_channel(f"歌曲不可用: {entry.song.display_name}")
             await self._on_playback_stopped()
             return
 
@@ -271,7 +329,7 @@ class BotApplication:
                 temp_file=downloaded.path,
                 duration=downloaded.duration,
             )
-            await self.sq.reply_to_channel(
+            await self.cq.reply_to_channel(
                 f"正在播放: {entry.song.display_name} - 点歌: {entry.requester_name}"
             )
         except Exception:
@@ -283,7 +341,7 @@ class BotApplication:
         logger.warning("Playback error, trying next song")
         current = self.music_queue.current
         if current:
-            await self.sq.reply_to_channel(f"播放出错: {current.song.display_name}，尝试下一首")
+            await self.cq.reply_to_channel(f"播放出错: {current.song.display_name}，尝试下一首")
         await self._on_playback_stopped()
 
     async def _start_webhook(self) -> None:
@@ -322,11 +380,17 @@ class BotApplication:
         self._register_commands()
         self._setup_event_handlers()
 
-        # Connect to ServerQuery
+        # Connect to ServerQuery (admin commands + server events)
         await self.sq.start()
 
-        # Sync ServerQuery to voice client's channel (runs in background)
-        asyncio.create_task(self.voice_tracker.initial_sync())
+        # Connect to ClientQuery (daily commands via voice client)
+        if self.config.clientquery.enabled:
+            api_key = self._read_clientquery_api_key()
+            if api_key:
+                self.cq._api_key = api_key
+                await self.cq.start()
+            else:
+                logger.warning("ClientQuery API key not found, skipping ClientQuery connection")
 
         # Start scheduler
         self.scheduler.start()
@@ -351,9 +415,9 @@ class BotApplication:
         # Fade out and stop audio
         await self.audio.fade_out_and_stop()
 
-        # Send goodbye message
+        # Send goodbye message via ClientQuery (voice client)
         try:
-            await self.sq.reply_to_channel("Bot 已下线")
+            await self.cq.reply_to_channel("Bot 已下线")
         except Exception:
             pass
 
@@ -361,7 +425,9 @@ class BotApplication:
         await self.netease.close()
         await self.chat_service.close()
 
-        # Disconnect ServerQuery
+        # Disconnect ClientQuery and ServerQuery
+        if self.config.clientquery.enabled:
+            await self.cq.stop()
         await self.sq.stop()
 
         logger.info("TS3 Bot stopped")

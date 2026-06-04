@@ -45,6 +45,13 @@ class TS3Config(BaseModel):
     command_prefix: str = "!"
 
 
+class ClientQueryConfig(BaseModel):
+    host: str = "127.0.0.1"
+    port: int = 25639
+    api_key: SecretStr = SecretStr("")
+    enabled: bool = True
+
+
 class AudioConfig(BaseModel):
     pulse_sink_name: str = "ts3bot_music"
     default_volume: int = Field(default=70, ge=0, le=100)
@@ -125,6 +132,7 @@ class LoggingConfig(BaseModel):
 
 class BotConfig(BaseModel):
     ts3: TS3Config = TS3Config()
+    clientquery: ClientQueryConfig = ClientQueryConfig()
     audio: AudioConfig = AudioConfig()
     netease: NeteaseConfig = NeteaseConfig()
     chat: ChatConfig = ChatConfig()
