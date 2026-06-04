@@ -10,7 +10,7 @@ from bot.config import BotConfig, load_config
 from bot.core.audio.controller import AudioController
 from bot.core.commands.context import CommandContext
 from bot.core.commands.parser import parse_command
-from bot.core.commands.registry import CommandRegistry
+from bot.core.commands.router import CommandRouter
 from bot.core.serverquery.client import AsyncServerQueryClient
 from bot.core.serverquery.events import SQEvent, TextMessageEvent
 from bot.services.automation.follow import FollowMode
@@ -51,7 +51,7 @@ class BotApplication:
             nickname=self.config.ts3.nickname,
         )
 
-        self.registry = CommandRegistry()
+        self.router = CommandRouter()
         self.audio = AudioController(
             ffmpeg_path=self.config.audio.ffmpeg_path or None,
             pulse_sink=self.config.audio.pulse_sink_name,
@@ -146,16 +146,26 @@ class BotApplication:
         )
 
     def _register_commands(self) -> None:
-        """Register all command handlers."""
+        """Register all command handlers with layered routing."""
         from bot.core.commands.handlers import admin, chat, debug, music, volume
 
-        debug.register(self.registry)
-        music.register(self.registry, self)
-        volume.register(self.registry, self)
-        chat.register(self.registry, self)
-        admin.register(self.registry, self, self.config.ts3.command_prefix)
+        prefix = self.config.ts3.command_prefix
 
-        logger.info("Registered %d commands", len(self.registry.get_all()))
+        # Channel commands (voice client / everyday interaction)
+        debug.register(self.router.channel_registry)
+        music.register(self.router.channel_registry, self)
+        volume.register(self.router.channel_registry, self)
+        chat.register(self.router.channel_registry, self)
+        admin.register_channel(self.router.channel_registry, self)
+
+        # Private commands (ServerQuery admin / management only)
+        admin.register_private(self.router.private_registry, self)
+
+        # Dual-context commands (available in both channel and private)
+        debug.register(self.router.private_registry)
+        admin.register_help(self.router, prefix)
+
+        logger.info("Registered %d commands", self.router.all_command_count())
 
     def _setup_event_handlers(self) -> None:
         """Wire up ServerQuery event handlers."""
@@ -191,8 +201,8 @@ class BotApplication:
         if cmd is None:
             return
 
-        # Look up command
-        cmd_info = self.registry.get(cmd.name)
+        # Route command based on message source (channel vs private)
+        cmd_info = self.router.resolve(cmd.name, cmd.target_mode)
         if cmd_info is None:
             return
 

@@ -1,4 +1,14 @@
-"""Admin command handlers: !welcome, !follow, !remind, !help."""
+"""Admin command handlers: !welcome, !follow, !remind, !help.
+
+Registration is split into three functions for the layered routing system:
+
+* ``register_private()`` — admin-only commands (!follow, !welcome) that
+  are only accessible via ServerQuery private messages.
+* ``register_channel()`` — utility commands (!remind) available in the
+  channel context.
+* ``register_help()`` — the !help command, registered in both contexts,
+  which uses the CommandRouter for a merged command listing.
+"""
 
 from __future__ import annotations
 
@@ -10,12 +20,16 @@ from bot.core.commands.registry import CommandRegistry
 
 if TYPE_CHECKING:
     from bot.app import BotApplication
+    from bot.core.commands.router import CommandRouter
 
 logger = logging.getLogger(__name__)
 
 
-def register(registry: CommandRegistry, app: BotApplication, prefix: str) -> None:
-    """Register admin commands."""
+def register_private(registry: CommandRegistry, app: BotApplication) -> None:
+    """Register admin-only commands into the private (ServerQuery) registry.
+
+    These commands are only accessible via private messages (target_mode=1).
+    """
 
     @registry.command("follow", aliases=["跟随"], help="开启/关闭房间跟随模式", admin_only=True)
     async def handle_follow(ctx: CommandContext) -> None:
@@ -34,6 +48,19 @@ def register(registry: CommandRegistry, app: BotApplication, prefix: str) -> Non
             await ctx.reply_same("跟随模式已关闭")
         else:
             await ctx.reply_same("用法: !follow on/off")
+
+    @registry.command("welcome", aliases=["欢迎"], help="设置欢迎消息", admin_only=True)
+    async def handle_welcome(ctx: CommandContext) -> None:
+        if not ctx.raw_args:
+            await ctx.reply_same("用法: !welcome <欢迎消息模板>\n支持占位符: {username}, {uid}")
+            return
+
+        app.welcome_service._message = ctx.raw_args
+        await ctx.reply_same(f"欢迎消息已更新: {ctx.raw_args}")
+
+
+def register_channel(registry: CommandRegistry, app: BotApplication) -> None:
+    """Register utility commands into the channel registry."""
 
     @registry.command("remind", aliases=["提醒"], help="设置定时提醒: !remind <分钟数> <消息>")
     async def handle_remind(ctx: CommandContext) -> None:
@@ -59,16 +86,13 @@ def register(registry: CommandRegistry, app: BotApplication, prefix: str) -> Non
         asyncio.create_task(delayed_remind())
         await ctx.reply_same(f"已设置 {minutes} 分钟后的提醒: {message}")
 
-    @registry.command("help", aliases=["h", "帮助"], help="显示帮助信息")
+
+def register_help(router: CommandRouter, prefix: str) -> None:
+    """Register !help in both contexts with merged command listing."""
+
     async def handle_help(ctx: CommandContext) -> None:
-        help_text = registry.format_help(prefix)
+        help_text = router.format_merged_help(prefix)
         await ctx.reply_same(help_text)
 
-    @registry.command("welcome", aliases=["欢迎"], help="设置欢迎消息", admin_only=True)
-    async def handle_welcome(ctx: CommandContext) -> None:
-        if not ctx.raw_args:
-            await ctx.reply_same("用法: !welcome <欢迎消息模板>\n支持占位符: {username}, {uid}")
-            return
-
-        app.welcome_service._message = ctx.raw_args
-        await ctx.reply_same(f"欢迎消息已更新: {ctx.raw_args}")
+    router.channel_registry.command("help", aliases=["h", "帮助"], help="显示帮助信息")(handle_help)
+    router.private_registry.command("help", aliases=["h", "帮助"], help="显示帮助信息")(handle_help)
